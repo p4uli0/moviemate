@@ -10,8 +10,6 @@ import { getNowPlayingUK, getMovieDetails } from "./api/tmdb.js";
 import AdBanner from "./components/AdBanner.jsx";
 import { getShowtimesFromApi } from "./api/ukCinema";
 
-const [showtimes, setShowtimes] = useState([]);
-
 
 // -------------------------------
 // DEMO CINEMAS – UK CITIES
@@ -204,39 +202,50 @@ function getDateRange(mode) {
 }
 
 // -------------------------------
-// UK CINEMA API SHOWTIMES
+// GENERATE DUMMY SHOWTIMES
 // -------------------------------
-useEffect(() => {
-  async function loadUKData() {
-    try {
-      const raw = await fetchUKCinemaShowtimes();
-      console.log("Raw UK Cinema API data: ", raw);
+function generateDemoShowtimes(movies) {
+  const times = ["11:10", "13:15", "15:45", "18:30", "20:10", "21:30"];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
-      const normalised = raw.map(item => ({
-        id: item.id,
-        film: item.film_id,
-        cinema: item.cinema_id,
-        date: item.showing_at,
-        time: new Date(item.showing_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        priceValue: 9.99, // Temporary until API includes price
-        price: "£9.99",
-        lat: item.latitude,
-        lng: item.longitude,
-        bookingUrl: item.booking_link,
-        chain: item.chain
-      }));
+  let id = 1;
+  const out = [];
 
-      console.log("Normalised UK Cinema showtimes:", normalised);
-      setShowtimes(normalised);
+  movies.forEach((movie, mIndex) => {
+    DEMO_CINEMAS.forEach((cin, cIndex) => {
+      for (let d = 0; d < DAYS_AHEAD; d++) {
+        const date = new Date(today);
+        date.setDate(today.getDate() + d);
 
-    } catch (err) {
-      console.error("UK Cinema API failed:", err);
-    }
-  }
+        const showCount = 2 + ((mIndex + cIndex + d) % 3);
 
-  loadUKData();
-}, []);
+        for (let i = 0; i < showCount; i++) {
+          const tIndex = (i + d + mIndex) % times.length;
+          const t = times[tIndex];
 
+          const variance = (Math.random() - 0.5) * 2;
+          const priceValue = Number((cin.basePrice + variance).toFixed(2));
+
+          out.push({
+            id: id++,
+            film: movie.title,
+            cinema: cin.name,
+            date,
+            time: t,
+            priceValue,
+            price: `£${priceValue.toFixed(2)}`,
+            lat: cin.lat,
+            lng: cin.lng,
+            bookingUrl: cin.bookingUrl,
+          });
+        }
+      }
+    });
+  });
+
+  return out;
+}
 
 // -------------------------------
 // MAIN APP
@@ -260,12 +269,12 @@ export default function App() {
   const showtimesRef = useRef(null);
   const moviesRef = useRef(null);
 
-  // 🔹 Call the UK Cinema API once when the app loads
+ // Call the UK Cinema API once when the app loads
   useEffect(() => {
     async function loadShowtimesFromApi() {
       try {
         const data = await getShowtimesFromApi();
-        console.log("UK Cinema API test:", data);  // 👈 you'll see this in the Console
+        console.log("UK Cinema API test:", data);
       } catch (err) {
         console.error("UK Cinema API error:", err);
       }
@@ -273,7 +282,6 @@ export default function App() {
 
     loadShowtimesFromApi();
   }, []);
-
 
 
   // TMDB load + geo
