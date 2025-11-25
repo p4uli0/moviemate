@@ -358,10 +358,59 @@ export default function App() {
     }, 80);
   }
 
- // TEMP: show all showtimes without filters, just to debug
+ // FILTER + SORT (with debug logs to see what's happening)
   const visibleShowtimes = (() => {
-    console.log("DEBUG: showtimes in state:", showtimes);
-    return showtimes;
+    let list = showtimes;
+
+    console.log("DEBUG total showtimes:", list.length);
+
+    // add distance
+    if (userLocation) {
+      list = list.map((s) => ({
+        ...s,
+        distanceMiles: distanceMiles(
+          userLocation.lat,
+          userLocation.lng,
+          s.lat,
+          s.lng
+        ),
+      }));
+    }
+
+    // selected film – make this fuzzy / case-insensitive
+    if (selectedFilm) {
+      const needle = selectedFilm.toLowerCase();
+      list = list.filter((s) =>
+        (s.film || "").toLowerCase().includes(needle)
+      );
+    }
+    console.log("After film filter:", list.length);
+
+    // date filter
+    const { start, end } = getDateRange(dateFilter);
+    const sKey = normaliseDate(start);
+    const eKey = normaliseDate(end);
+
+    list = list.filter((s) => {
+      const k = normaliseDate(s.date);
+      return k >= sKey && k <= eKey;
+    });
+    console.log("After date filter:", list.length);
+
+    // scope (near me / all)
+    if (scope === "near" && userLocation) {
+      list = list.filter((s) => s.distanceMiles <= NEARBY_RADIUS_MILES);
+    }
+    console.log("After scope filter:", list.length);
+
+    // sort
+    list = list.slice().sort((a, b) => {
+      if (sortMode === "price") return a.priceValue - b.priceValue;
+      if (!userLocation) return a.priceValue - b.priceValue;
+      return a.distanceMiles - b.distanceMiles;
+    });
+
+    return list;
   })();
 
   const cheapest =
