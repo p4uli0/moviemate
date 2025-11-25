@@ -1,172 +1,26 @@
 // ===============================
-// MOVIEMATE – APP USING UK CINEMA API
-// TMDB movies + UK Cinema showtimes
-// - Location used only for distance / "near me"
-// - Shows real API data
-// - Filters showtimes by selected film
+// MOVIEMATE – LIVE UK CINEMA + TMDB
+// - Posters only for films actually showing locally (radius + date)
+// - No showtimes until a film is selected
+// - When selected: description, cert, rating, trailer + showtimes
+// - Showtimes filtered by date + radius cascade (20→30→50→100)
+// - Sort by cheapest / nearest
 // ===============================
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import "./index.css";
 import { getNowPlayingUK, getMovieDetails } from "./api/tmdb.js";
 import AdBanner from "./components/AdBanner.jsx";
 import { getShowtimesFromApi } from "./api/ukCinema";
 
 // -------------------------------
-// DEMO CINEMAS – fallback dummy data
+// RADIUS CASCADE STEPS
 // -------------------------------
-const DEMO_CINEMAS = [
-  // Leeds
-  {
-    name: "Odeon Leeds",
-    lat: 53.8013,
-    lng: -1.5456,
-    basePrice: 11.99,
-    bookingUrl: "https://www.odeon.co.uk/",
-  },
-  {
-    name: "Vue Kirkstall",
-    lat: 53.8203,
-    lng: -1.6035,
-    basePrice: 10.49,
-    bookingUrl: "https://www.myvue.com/",
-  },
-
-  // York
-  {
-    name: "Cineworld York",
-    lat: 53.9683,
-    lng: -1.085,
-    basePrice: 10.99,
-    bookingUrl: "https://www.cineworld.co.uk/",
-  },
-
-  // Hull
-  {
-    name: "Cineworld Hull",
-    lat: 53.7443,
-    lng: -0.3325,
-    basePrice: 9.99,
-    bookingUrl: "https://www.cineworld.co.uk/",
-  },
-  {
-    name: "Vue Hull Princes Quay",
-    lat: 53.7415,
-    lng: -0.3375,
-    basePrice: 9.49,
-    bookingUrl: "https://www.myvue.com/",
-  },
-
-  // Newcastle
-  {
-    name: "Vue Gateshead",
-    lat: 54.9606,
-    lng: -1.6174,
-    basePrice: 9.99,
-    bookingUrl: "https://www.myvue.com/",
-  },
-  {
-    name: "Cineworld Newcastle",
-    lat: 54.9723,
-    lng: -1.6139,
-    basePrice: 10.49,
-    bookingUrl: "https://www.cineworld.co.uk/",
-  },
-
-  // Liverpool / Cheshire
-  {
-    name: "Odeon Liverpool One",
-    lat: 53.4036,
-    lng: -2.9856,
-    basePrice: 11.49,
-    bookingUrl: "https://www.odeon.co.uk/",
-  },
-  {
-    name: "Vue Cheshire Oaks",
-    lat: 53.2586,
-    lng: -2.8801,
-    basePrice: 10.99,
-    bookingUrl: "https://www.myvue.com/",
-  },
-
-  // Cardiff
-  {
-    name: "Vue Cardiff",
-    lat: 51.4816,
-    lng: -3.1791,
-    basePrice: 10.99,
-    bookingUrl: "https://www.myvue.com/",
-  },
-  {
-    name: "Cineworld Cardiff",
-    lat: 51.479,
-    lng: -3.1715,
-    basePrice: 11.29,
-    bookingUrl: "https://www.cineworld.co.uk/",
-  },
-
-  // London
-  {
-    name: "Vue Westfield White City",
-    lat: 51.5079,
-    lng: -0.2219,
-    basePrice: 13.5,
-    bookingUrl: "https://www.myvue.com/",
-  },
-  {
-    name: "Cineworld Greenwich O2",
-    lat: 51.501,
-    lng: 0.0032,
-    basePrice: 13.25,
-    bookingUrl: "https://www.cineworld.co.uk/",
-  },
-];
+const RADIUS_STEPS = [20, 30, 50, 100];
 
 // -------------------------------
-// FALLBACK MOVIES
+// DATE RANGE LOGIC
 // -------------------------------
-const FALLBACK_MOVIES = [
-  { id: 99901, title: "Dune: Part Two", poster_path: null, vote_average: 8.4 },
-  { id: 99902, title: "Inside Out 2", poster_path: null, vote_average: 7.9 },
-  { id: 99903, title: "Deadpool & Wolverine", poster_path: null, vote_average: 8.1 },
-  { id: 99904, title: "The Fall Guy", poster_path: null, vote_average: 7.0 },
-];
-
-const NEARBY_RADIUS_MILES = 20;
-const DAYS_AHEAD = 7;
-
-// -------------------------------
-// Helper functions
-// -------------------------------
-function distanceMiles(lat1, lon1, lat2, lon2) {
-  const R = 3958.8; // miles
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function normaliseDate(d) {
-  const dt = new Date(d);
-  dt.setHours(0, 0, 0, 0);
-  return dt.getTime();
-}
-
-function formatShowDate(d) {
-  const dt = new Date(d);
-  return dt.toLocaleDateString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
-}
-
 function getDateRange(mode) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -199,51 +53,38 @@ function getDateRange(mode) {
   return { start: today, end: today };
 }
 
-// Dummy generator for fallback
-function generateDemoShowtimes(movies) {
-  const times = ["11:10", "13:15", "15:45", "18:30", "20:10", "21:30"];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+// -------------------------------
+// HELPERS
+// -------------------------------
+function distanceMiles(lat1, lon1, lat2, lon2) {
+  const R = 3958.8; // miles
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
 
-  let id = 1;
-  const out = [];
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
 
-  movies.forEach((movie, mIndex) => {
-    DEMO_CINEMAS.forEach((cin, cIndex) => {
-      for (let d = 0; d < DAYS_AHEAD; d++) {
-        const date = new Date(today);
-        date.setDate(today.getDate() + d);
-
-        const showCount = 2 + ((mIndex + cIndex + d) % 3);
-
-        for (let i = 0; i < showCount; i++) {
-          const tIndex = (i + d + mIndex) % times.length;
-          const t = times[tIndex];
-
-          const variance = (Math.random() - 0.5) * 2;
-          const priceValue = Number((cin.basePrice + variance).toFixed(2));
-
-          out.push({
-            id: id++,
-            film: movie.title,
-            cinema: cin.name,
-            date,
-            time: t,
-            priceValue,
-            price: `£${priceValue.toFixed(2)}`,
-            lat: cin.lat,
-            lng: cin.lng,
-            bookingUrl: cin.bookingUrl,
-          });
-        }
-      }
-    });
-  });
-
-  return out;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Normalise film titles for fuzzy matching
+function normaliseDate(d) {
+  const dt = new Date(d);
+  dt.setHours(0, 0, 0, 0);
+  return dt.getTime();
+}
+
+function formatShowDate(d) {
+  const dt = new Date(d);
+  return dt.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
+
 function normaliseTitle(str) {
   if (!str) return "";
   return str
@@ -254,63 +95,96 @@ function normaliseTitle(str) {
     .trim();
 }
 
+function titlesMatch(a, b) {
+  const na = normaliseTitle(a);
+  const nb = normaliseTitle(b);
+  if (!na || !nb) return false;
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+// Apply radius cascade 20→30→50→100
+function applyRadiusCascade(list, userLocation) {
+  if (!userLocation) {
+    return { filtered: list, radiusUsed: null };
+  }
+
+  for (const r of RADIUS_STEPS) {
+    const within = list.filter(
+      (s) =>
+        typeof s.distanceMiles === "number" && s.distanceMiles <= r
+    );
+    if (within.length > 0) {
+      return { filtered: within, radiusUsed: r };
+    }
+  }
+
+  // Nothing within 100 miles → national fallback
+  return { filtered: list, radiusUsed: null };
+}
+
 // ===============================
 // MAIN APP
 // ===============================
 export default function App() {
-  const [nowPlaying, setNowPlaying] = useState(FALLBACK_MOVIES);
-  const [showtimes, setShowtimes] = useState(
-    generateDemoShowtimes(FALLBACK_MOVIES)
-  );
+  const [nowPlaying, setNowPlaying] = useState([]);
+  const [rawShowtimes, setRawShowtimes] = useState([]);
 
-  const [selectedFilm, setSelectedFilm] = useState(null); // full movie object
+  const [selectedFilm, setSelectedFilm] = useState(null); // TMDB movie object
   const [filmDetails, setFilmDetails] = useState(null);
   const [detailCache, setDetailCache] = useState({});
   const [trailerOpen, setTrailerOpen] = useState(false);
 
   const [sortMode, setSortMode] = useState("price"); // "price" | "distance"
-  const [scope, setScope] = useState("near"); // "near" | "all"
-  const [dateFilter, setDateFilter] = useState("today");
+  const [dateFilter, setDateFilter] = useState("today"); // "today" | "weekend" | "7days"
 
   const [userLocation, setUserLocation] = useState(null);
   const [locationError, setLocationError] = useState("");
+
+  const [usedRadius, setUsedRadius] = useState(null);
 
   const showtimesRef = useRef(null);
   const moviesRef = useRef(null);
 
   // -------------------------------
-  // Load TMDB + geolocation
+  // Load TMDB "Now Playing" (UK)
   // -------------------------------
   useEffect(() => {
     async function loadMovies() {
       try {
         const movies = await getNowPlayingUK();
-        if (!movies.length) throw new Error("empty");
-        setNowPlaying(movies);
+        setNowPlaying(movies || []);
       } catch (err) {
-        console.error("TMDB error, using fallback movies:", err);
-        setNowPlaying(FALLBACK_MOVIES);
+        console.error("TMDB error loading now playing:", err);
+        setNowPlaying([]);
       }
     }
 
     loadMovies();
-
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setUserLocation({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-          });
-          setLocationError("");
-        },
-        () => setLocationError("Location permission denied.")
-      );
-    }
   }, []);
 
   // -------------------------------
-  // Load UK Cinema API showtimes (once)
+  // Geolocation
+  // -------------------------------
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLocationError("Geolocation not supported.");
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
+        setLocationError("");
+      },
+      () => setLocationError("Location permission denied.")
+    );
+  }, []);
+
+  // -------------------------------
+  // Load UK Cinema showtimes (once)
   // -------------------------------
   useEffect(() => {
     async function loadShowtimesFromApi() {
@@ -320,12 +194,14 @@ export default function App() {
 
         if (Array.isArray(apiShowtimes)) {
           console.log("✅ Using API showtimes, count:", apiShowtimes.length);
-          setShowtimes(apiShowtimes);
+          setRawShowtimes(apiShowtimes);
         } else {
-          console.warn("API returned non-array, keeping demo data.");
+          console.warn("API returned non-array, no showtimes loaded.");
+          setRawShowtimes([]);
         }
       } catch (err) {
-        console.error("UK Cinema API error, keeping demo showtimes:", err);
+        console.error("UK Cinema API error:", err);
+        setRawShowtimes([]);
       }
     }
 
@@ -333,17 +209,109 @@ export default function App() {
   }, []);
 
   // -------------------------------
-  // Movie click → details + scroll
+  // Derived: filtered showtimes (date + radius)
+  // -------------------------------
+  const { filteredShowtimes, effectiveDateFilter } = useMemo(() => {
+    if (!rawShowtimes.length) {
+      return { filteredShowtimes: [], effectiveDateFilter: dateFilter };
+    }
+
+    // Step 1: add distance if we have location
+    let list = rawShowtimes.map((s) => {
+      if (
+        userLocation &&
+        typeof s.lat === "number" &&
+        typeof s.lng === "number"
+      ) {
+        return {
+          ...s,
+          distanceMiles: distanceMiles(
+            userLocation.lat,
+            userLocation.lng,
+            s.lat,
+            s.lng
+          ),
+        };
+      }
+      return { ...s, distanceMiles: null };
+    });
+
+    // Step 2: apply date filter (today / weekend / 7 days)
+    const applyDate = (mode) => {
+      const { start, end } = getDateRange(mode);
+      const sKey = normaliseDate(start);
+      const eKey = normaliseDate(end);
+
+      return list.filter((show) => {
+        const k = normaliseDate(show.date);
+        return k >= sKey && k <= eKey;
+      });
+    };
+
+    // Try current dateFilter first
+    let filtered = applyDate(dateFilter);
+    let eff = dateFilter;
+
+    // If nothing for that dateFilter, fall back to 7 days
+    if (filtered.length === 0 && dateFilter !== "7days") {
+      console.log(
+        `No showtimes for date filter "${dateFilter}", falling back to "7days".`
+      );
+      filtered = applyDate("7days");
+      eff = "7days";
+    }
+
+    // Step 3: radius cascade 20→30→50→100
+    const { filtered: radiusFiltered, radiusUsed } = applyRadiusCascade(
+      filtered,
+      userLocation
+    );
+    if (radiusUsed) {
+      console.log(`Using radius ${radiusUsed} miles for local showtimes.`);
+      setUsedRadius(radiusUsed);
+    } else {
+      setUsedRadius(null);
+    }
+
+    console.log(
+      "After date + radius filtering, showtimes:",
+      radiusFiltered.length
+    );
+
+    return { filteredShowtimes: radiusFiltered, effectiveDateFilter: eff };
+  }, [rawShowtimes, userLocation, dateFilter]);
+
+  // Keep UI in sync if we had to fall back to 7 days
+  useEffect(() => {
+    if (effectiveDateFilter !== dateFilter) {
+      setDateFilter(effectiveDateFilter);
+    }
+  }, [effectiveDateFilter, dateFilter]);
+
+  // -------------------------------
+  // Derived: films that actually have showtimes
+  // -------------------------------
+  const localMovies = useMemo(() => {
+    if (!nowPlaying.length || !filteredShowtimes.length) return [];
+
+    return nowPlaying.filter((movie) => {
+      const mTitle = movie.title || "";
+      return filteredShowtimes.some((s) => titlesMatch(mTitle, s.film));
+    });
+  }, [nowPlaying, filteredShowtimes]);
+
+  // -------------------------------
+  // Movie click → TMDB details + scroll
   // -------------------------------
   async function handleMovieClick(m) {
-    setSelectedFilm(m); // store full movie object
+    setSelectedFilm(m);
 
     if (detailCache[m.id]) {
       setFilmDetails(detailCache[m.id]);
     } else {
       try {
         const details = await getMovieDetails(m.id);
-        setDetailCache((p) => ({ ...p, [m.id]: details }));
+        setDetailCache((prev) => ({ ...prev, [m.id]: details }));
         setFilmDetails(details);
       } catch (err) {
         console.error("Error loading film details:", err);
@@ -369,85 +337,25 @@ export default function App() {
   }
 
   // -------------------------------
-  // FILTER + SORT SHOWTIMES
+  // Visible showtimes (only after a film is selected)
   // -------------------------------
-  const visibleShowtimes = (() => {
-    let list = showtimes.slice();
+  const visibleShowtimes = useMemo(() => {
+    // No film selected → no showtimes
+    if (!selectedFilm) return [];
 
-    console.log("DEBUG total showtimes:", list.length);
+    let list = filteredShowtimes.slice();
 
-    // Add distance if we have location
-    if (userLocation) {
-      list = list.map((s) => ({
-        ...s,
-        distanceMiles:
-          s.lat != null && s.lng != null
-            ? distanceMiles(userLocation.lat, userLocation.lng, s.lat, s.lng)
-            : null,
-      }));
-    }
+    // Filter to this film only (by title)
+    const filmTitle = selectedFilm.title || "";
 
-    // FILM FILTER – only show showtimes for the selected film
-    if (selectedFilm) {
-      const filmKey = normaliseTitle(selectedFilm.title);
+    list = list.filter((s) => titlesMatch(filmTitle, s.film));
+    console.log(
+      `Showtimes after film filter for "${filmTitle}":`,
+      list.length
+    );
 
-      list = list.filter((s) => {
-        const title = normaliseTitle(
-          s.film || s.title || s.film_title || s.original_title || ""
-        );
-
-        const tmdbMatch =
-          s.tmdbId != null &&
-          selectedFilm.id != null &&
-          String(s.tmdbId) === String(selectedFilm.id);
-
-        const filmIdMatch =
-          s.filmId != null &&
-          selectedFilm.id != null &&
-          String(s.filmId) === String(selectedFilm.id);
-
-        const titleMatch =
-          title &&
-          filmKey &&
-          (title.includes(filmKey) || filmKey.includes(title));
-
-        return tmdbMatch || filmIdMatch || titleMatch;
-      });
-
-      console.log("After film filter:", list.length);
-    }
-
-    // DATE FILTER
-    const { start, end } = getDateRange(dateFilter);
-    const sKey = normaliseDate(start);
-    const eKey = normaliseDate(end);
-
-    list = list.filter((s) => {
-      const k = normaliseDate(s.date);
-      return k >= sKey && k <= eKey;
-    });
-    console.log("After date filter:", list.length);
-
-    // SCOPE: near me vs all (if none within radius, fall back to all)
-    if (scope === "near" && userLocation) {
-      const near = list.filter(
-        (s) =>
-          typeof s.distanceMiles === "number" &&
-          s.distanceMiles <= NEARBY_RADIUS_MILES
-      );
-
-      if (near.length > 0) {
-        list = near;
-      } else {
-        console.log(
-          "No local showtimes within radius, falling back to all results."
-        );
-      }
-    }
-    console.log("After scope filter:", list.length);
-
-    // SORT: cheapest or nearest
-    list = list.sort((a, b) => {
+    // Sort: cheapest or nearest
+    list.sort((a, b) => {
       if (sortMode === "price") {
         return a.priceValue - b.priceValue;
       }
@@ -464,7 +372,7 @@ export default function App() {
     });
 
     return list;
-  })();
+  }, [filteredShowtimes, selectedFilm, sortMode, userLocation]);
 
   const cheapest =
     visibleShowtimes.length > 0
@@ -484,10 +392,17 @@ export default function App() {
 
       {/* MOVIES GRID */}
       <section className="now-playing-section" ref={moviesRef}>
-        <h2 className="section-title">Now in UK Cinemas</h2>
+        <h2 className="section-title">Now in UK Cinemas (near you)</h2>
+
+        {!localMovies.length && (
+          <p className="no-results">
+            No local films found for this date range yet. Try changing the date
+            filter.
+          </p>
+        )}
 
         <div className="movies-grid">
-          {nowPlaying.map((m) => (
+          {localMovies.map((m) => (
             <button
               key={m.id}
               className="movie-card"
@@ -539,6 +454,12 @@ export default function App() {
           </button>
         </div>
 
+        {usedRadius && (
+          <p className="radius-indicator">
+            Showing films within about {usedRadius} miles of you.
+          </p>
+        )}
+
         {/* FILM DETAILS HEADER */}
         {selectedFilm && filmDetails && (
           <div className="film-detail-header">
@@ -558,7 +479,7 @@ export default function App() {
                 <p className="film-overview">{filmDetails.overview}</p>
               )}
 
-              {filmDetails.cast && (
+              {filmDetails.cast && filmDetails.cast.length > 0 && (
                 <p className="film-cast">
                   <strong>Cast:</strong> {filmDetails.cast.join(", ")}
                 </p>
@@ -612,8 +533,20 @@ export default function App() {
           <p className="location-error">{locationError}</p>
         )}
 
-        {/* SHOWTIME CARDS */}
+        {/* SHOWTIME CARDS – only when a film is selected */}
         <div className="showtime-list">
+          {!selectedFilm && (
+            <p className="no-results">
+              Select a film above to see local showtimes.
+            </p>
+          )}
+
+          {selectedFilm && visibleShowtimes.length === 0 && (
+            <p className="no-results">
+              No showtimes match your filters for this film.
+            </p>
+          )}
+
           {visibleShowtimes.map((s) => (
             <div
               key={s.id}
@@ -655,10 +588,6 @@ export default function App() {
               </a>
             </div>
           ))}
-
-          {visibleShowtimes.length === 0 && (
-            <p className="no-results">No showtimes match your filters.</p>
-          )}
         </div>
 
         {/* TRAILER MODAL */}

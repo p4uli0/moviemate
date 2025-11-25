@@ -10,7 +10,6 @@ const CHAIN_LABELS = {
 };
 
 export async function getShowtimesFromApi() {
-  // 👇 No lat/lng here – just call the Netlify function
   const res = await fetch("/.netlify/functions/ukCinema");
 
   if (!res.ok) {
