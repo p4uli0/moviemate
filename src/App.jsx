@@ -3,8 +3,8 @@
 // - TMDB posters always visible
 // - NO showtimes until a film is selected
 // - When a film is selected: filter UK Cinema API showtimes
-//   by fuzzy title match only
-// - Location only used for distance/neares sorting
+//   by fuzzy title match with fallback
+// - Location only used for distance / "Nearest" / radius
 // ===============================
 
 import { useState, useEffect, useRef } from "react";
@@ -14,7 +14,7 @@ import AdBanner from "./components/AdBanner.jsx";
 import { getShowtimesFromApi } from "./api/ukCinema";
 
 // -------------------------------
-// FALLBACK MOVIES (only if TMDB fails)
+// FALLBACK MOVIES (if TMDB fails)
 // -------------------------------
 const FALLBACK_MOVIES = [
   { id: 99901, title: "Dune: Part Two", poster_path: null, vote_average: 8.4 },
@@ -23,7 +23,7 @@ const FALLBACK_MOVIES = [
   { id: 99904, title: "The Fall Guy", poster_path: null, vote_average: 7.0 },
 ];
 
-// dynamic radius steps (we can tweak later)
+// Radius steps for "near me" fallback
 const RADIUS_STEPS_MILES = [20, 30, 50, 100];
 
 // -------------------------------
@@ -107,7 +107,7 @@ function normaliseTitle(str) {
 // ===============================
 export default function App() {
   const [nowPlaying, setNowPlaying] = useState(FALLBACK_MOVIES);
-  const [showtimes, setShowtimes] = useState([]); // purely API once loaded
+  const [showtimes, setShowtimes] = useState([]); // only real API data
 
   const [selectedFilm, setSelectedFilm] = useState(null); // TMDB movie object
   const [filmDetails, setFilmDetails] = useState(null);
@@ -130,8 +130,13 @@ export default function App() {
     async function loadMovies() {
       try {
         const movies = await getNowPlayingUK();
-        if (!movies.length) throw new Error("empty");
-        setNowPlaying(movies);
+
+        if (Array.isArray(movies) && movies.length > 0) {
+          setNowPlaying(movies);
+        } else {
+          console.warn("TMDB returned empty list, using fallback movies");
+          setNowPlaying(FALLBACK_MOVIES);
+        }
       } catch (err) {
         console.error("TMDB error, using fallback movies:", err);
         setNowPlaying(FALLBACK_MOVIES);
@@ -142,7 +147,7 @@ export default function App() {
   }, []);
 
   // -------------------------------
-  // Ask for location on user gesture only
+  // Ask for location on user gesture
   // -------------------------------
   function requestLocation() {
     if (!navigator.geolocation) {
@@ -233,123 +238,64 @@ export default function App() {
   // FILTER + SORT SHOWTIMES
   // -------------------------------
   const visibleShowtimes = (() => {
-  // No film selected → no showtimes
-  if (!selectedFilm) {
-    console.log("No film selected → no showtimes.");
-    return [];
-  }
-
-  let list = showtimes.slice();
-  console.log("DEBUG total showtimes:", list.length);
-
-  if (!list.length) {
-    console.log("No showtimes loaded from API yet.");
-    return [];
-  }
-
-  // Add distance if we have location
-  if (userLocation) {
-    list = list.map((s) => ({
-      ...s,
-      distanceMiles:
-        s.lat != null && s.lng != null
-          ? distanceMiles(userLocation.lat, userLocation.lng, s.lat, s.lng)
-          : null,
-    }));
-  }
-
-  // --- FILM FILTER with fallback ---
-  const filmKey = normaliseTitle(selectedFilm.title);
-  const beforeFilmFilter = list;
-
-  let filteredByTitle = list.filter((s) => {
-    const title = normaliseTitle(
-      s.film || s.title || s.film_title || s.original_title || ""
-    );
-    return title && filmKey && (title.includes(filmKey) || filmKey.includes(title));
-  });
-
-  console.log(
-    "After film-title filter:",
-    filteredByTitle.length,
-    "for",
-    selectedFilm.title
-  );
-
-  // If title matching wipes out everything, FALL BACK to all showtimes
-  if (filteredByTitle.length === 0) {
-    console.warn(
-      "Film title filter removed all showtimes – falling back to unfiltered list (debug)."
-    );
-    list = beforeFilmFilter;
-  } else {
-    list = filteredByTitle;
-  }
-
-  // --- DATE FILTER ---
-  const { start, end } = getDateRange(dateFilter);
-  const sKey = normaliseDate(start);
-  const eKey = normaliseDate(end);
-
-  list = list.filter((s) => {
-    const k = normaliseDate(s.date);
-    return k >= sKey && k <= eKey;
-  });
-  console.log("After date filter:", list.length);
-
-  if (!list.length) return [];
-
-  // --- RADIUS FALLBACK (if we have location) ---
-  if (userLocation) {
-    let chosen = list;
-    let usedRadius = null;
-
-    for (const r of RADIUS_STEPS_MILES) {
-      const near = list.filter(
-        (s) =>
-          typeof s.distanceMiles === "number" &&
-          s.distanceMiles <= r
-      );
-      if (near.length > 0) {
-        chosen = near;
-        usedRadius = r;
-        break;
-      }
+    // No film selected → no showtimes
+    if (!selectedFilm) {
+      console.log("No film selected → no showtimes.");
+      return [];
     }
+
+    let list = showtimes.slice();
+    console.log("DEBUG total showtimes:", list.length);
+
+    if (!list.length) {
+      console.log("No showtimes loaded from API yet.");
+      return [];
+    }
+
+    // Add distance if we have location
+    if (userLocation) {
+      list = list.map((s) => ({
+        ...s,
+        distanceMiles:
+          s.lat != null && s.lng != null
+            ? distanceMiles(userLocation.lat, userLocation.lng, s.lat, s.lng)
+            : null,
+      }));
+    }
+
+    // --- FILM FILTER with fallback ---
+    const filmKey = normaliseTitle(selectedFilm.title);
+    const beforeFilmFilter = list;
+
+    let filteredByTitle = list.filter((s) => {
+      const title = normaliseTitle(
+        s.film || s.title || s.film_title || s.original_title || ""
+      );
+      return (
+        title &&
+        filmKey &&
+        (title.includes(filmKey) || filmKey.includes(title))
+      );
+    });
 
     console.log(
-      "After radius filter, used radius:",
-      usedRadius,
-      "count:",
-      chosen.length
+      "After film-title filter:",
+      filteredByTitle.length,
+      "for",
+      selectedFilm.title
     );
 
-    list = chosen;
-    if (!list.length) return [];
-  }
-
-  // --- SORT: cheapest or nearest ---
-  list = list.sort((a, b) => {
-    if (sortMode === "price") {
-      return a.priceValue - b.priceValue;
+    // If title matching wipes out everything, FALL BACK to all showtimes
+    if (filteredByTitle.length === 0) {
+      console.warn(
+        "Film title filter removed all showtimes – falling back to unfiltered list (debug)."
+      );
+      list = beforeFilmFilter;
+    } else {
+      list = filteredByTitle;
     }
 
-    if (sortMode === "distance" && userLocation) {
-      const da =
-        typeof a.distanceMiles === "number" ? a.distanceMiles : Infinity;
-      const db =
-        typeof b.distanceMiles === "number" ? b.distanceMiles : Infinity;
-      return da - db;
-    }
-
-    return a.priceValue - b.priceValue;
-  });
-
-  return list;
-})();
-
-
-    // Date filter
+    // --- DATE FILTER ---
     const { start, end } = getDateRange(dateFilter);
     const sKey = normaliseDate(start);
     const eKey = normaliseDate(end);
@@ -359,9 +305,10 @@ export default function App() {
       return k >= sKey && k <= eKey;
     });
     console.log("After date filter:", list.length);
-    if (list.length === 0) return [];
 
-    // Radius fallback (20 → 30 → 50 → 100 miles) if we have location
+    if (!list.length) return [];
+
+    // --- RADIUS FALLBACK (if we have location) ---
     if (userLocation) {
       let chosen = list;
       let usedRadius = null;
@@ -387,9 +334,10 @@ export default function App() {
       );
 
       list = chosen;
+      if (!list.length) return [];
     }
 
-    // Sort: cheapest or nearest
+    // --- SORT: cheapest or nearest ---
     list = list.sort((a, b) => {
       if (sortMode === "price") {
         return a.priceValue - b.priceValue;
