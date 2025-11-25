@@ -1,8 +1,9 @@
 // ===============================
-// MOVIEMATE – FULL APP (API version)
-// TMDB movies + UK Cinema API showtimes
-// Location-aware, date filters, cheapest/nearest
-// 👉 For now, showtimes are NOT filtered by film
+// MOVIEMATE – APP USING UK CINEMA API
+// TMDB movies + UK Cinema showtimes
+// - Location used only for distance / "near me"
+// - Shows real API data
+// - Filters showtimes by selected film
 // ===============================
 
 import { useState, useEffect, useRef } from "react";
@@ -135,7 +136,7 @@ const NEARBY_RADIUS_MILES = 20;
 const DAYS_AHEAD = 7;
 
 // -------------------------------
-// Helpers
+// Helper functions
 // -------------------------------
 function distanceMiles(lat1, lon1, lat2, lon2) {
   const R = 3958.8; // miles
@@ -198,7 +199,7 @@ function getDateRange(mode) {
   return { start: today, end: today };
 }
 
-// Generate demo showtimes for fallback
+// Dummy generator for fallback
 function generateDemoShowtimes(movies) {
   const times = ["11:10", "13:15", "15:45", "18:30", "20:10", "21:30"];
   const today = new Date();
@@ -242,6 +243,17 @@ function generateDemoShowtimes(movies) {
   return out;
 }
 
+// Normalise film titles for fuzzy matching
+function normaliseTitle(str) {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(3d|2d|imax|the movie|movie|film)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // ===============================
 // MAIN APP
 // ===============================
@@ -251,7 +263,7 @@ export default function App() {
     generateDemoShowtimes(FALLBACK_MOVIES)
   );
 
-  const [selectedFilm, setSelectedFilm] = useState(null);
+  const [selectedFilm, setSelectedFilm] = useState(null); // full movie object
   const [filmDetails, setFilmDetails] = useState(null);
   const [detailCache, setDetailCache] = useState({});
   const [trailerOpen, setTrailerOpen] = useState(false);
@@ -267,17 +279,16 @@ export default function App() {
   const moviesRef = useRef(null);
 
   // -------------------------------
-  // Load TMDB movies + geolocation
+  // Load TMDB + geolocation
   // -------------------------------
   useEffect(() => {
     async function loadMovies() {
       try {
         const movies = await getNowPlayingUK();
         if (!movies.length) throw new Error("empty");
-
         setNowPlaying(movies);
       } catch (err) {
-        console.error("TMDB error, falling back to static movies:", err);
+        console.error("TMDB error, using fallback movies:", err);
         setNowPlaying(FALLBACK_MOVIES);
       }
     }
@@ -299,36 +310,33 @@ export default function App() {
   }, []);
 
   // -------------------------------
-  // Load UK Cinema API showtimes once we have a location
+  // Load UK Cinema API showtimes (once)
   // -------------------------------
   useEffect(() => {
-  async function loadShowtimesFromApi() {
-    try {
-      const apiShowtimes = await getShowtimesFromApi();
-      console.log("UK Cinema API showtimes for app:", apiShowtimes);
+    async function loadShowtimesFromApi() {
+      try {
+        const apiShowtimes = await getShowtimesFromApi();
+        console.log("UK Cinema API showtimes for app:", apiShowtimes);
 
-      if (Array.isArray(apiShowtimes)) {
-        console.log(
-          "✅ Using API showtimes, count:",
-          apiShowtimes.length
-        );
-        setShowtimes(apiShowtimes); // always use API result, even if empty
-      } else {
-        console.warn("API returned non-array, keeping demo data.");
+        if (Array.isArray(apiShowtimes)) {
+          console.log("✅ Using API showtimes, count:", apiShowtimes.length);
+          setShowtimes(apiShowtimes);
+        } else {
+          console.warn("API returned non-array, keeping demo data.");
+        }
+      } catch (err) {
+        console.error("UK Cinema API error, keeping demo showtimes:", err);
       }
-    } catch (err) {
-      console.error("UK Cinema API error, keeping demo showtimes:", err);
     }
-  }
 
-  loadShowtimesFromApi();
-  }, []); // ⬅ runs once on load
+    loadShowtimesFromApi();
+  }, []);
 
   // -------------------------------
-  // Movie click → load TMDB details + scroll
+  // Movie click → details + scroll
   // -------------------------------
   async function handleMovieClick(m) {
-    setSelectedFilm(m); // full movie object
+    setSelectedFilm(m); // store full movie object
 
     if (detailCache[m.id]) {
       setFilmDetails(detailCache[m.id]);
@@ -362,7 +370,6 @@ export default function App() {
 
   // -------------------------------
   // FILTER + SORT SHOWTIMES
-  // 👉 IMPORTANT: no film filter for now
   // -------------------------------
   const visibleShowtimes = (() => {
     let list = showtimes.slice();
@@ -380,6 +387,36 @@ export default function App() {
       }));
     }
 
+    // FILM FILTER – only show showtimes for the selected film
+    if (selectedFilm) {
+      const filmKey = normaliseTitle(selectedFilm.title);
+
+      list = list.filter((s) => {
+        const title = normaliseTitle(
+          s.film || s.title || s.film_title || s.original_title || ""
+        );
+
+        const tmdbMatch =
+          s.tmdbId != null &&
+          selectedFilm.id != null &&
+          String(s.tmdbId) === String(selectedFilm.id);
+
+        const filmIdMatch =
+          s.filmId != null &&
+          selectedFilm.id != null &&
+          String(s.filmId) === String(selectedFilm.id);
+
+        const titleMatch =
+          title &&
+          filmKey &&
+          (title.includes(filmKey) || filmKey.includes(title));
+
+        return tmdbMatch || filmIdMatch || titleMatch;
+      });
+
+      console.log("After film filter:", list.length);
+    }
+
     // DATE FILTER
     const { start, end } = getDateRange(dateFilter);
     const sKey = normaliseDate(start);
@@ -391,13 +428,21 @@ export default function App() {
     });
     console.log("After date filter:", list.length);
 
-    // SCOPE: near me vs all
+    // SCOPE: near me vs all (if none within radius, fall back to all)
     if (scope === "near" && userLocation) {
-      list = list.filter(
+      const near = list.filter(
         (s) =>
           typeof s.distanceMiles === "number" &&
           s.distanceMiles <= NEARBY_RADIUS_MILES
       );
+
+      if (near.length > 0) {
+        list = near;
+      } else {
+        console.log(
+          "No local showtimes within radius, falling back to all results."
+        );
+      }
     }
     console.log("After scope filter:", list.length);
 
