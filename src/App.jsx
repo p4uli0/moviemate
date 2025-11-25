@@ -382,24 +382,38 @@ export default function App() {
       }));
     }
 
-    // FILM FILTER – match showtimes to selected film
+   // FILM FILTER – match showtimes to selected film (by TMDB id and title)
     if (selectedFilm) {
       const needle = (selectedFilm.title || "").toLowerCase();
-      console.log("Filtering for film title:", needle);
+      console.log(
+        "Filtering for film title:",
+        needle,
+        "TMDB id:",
+        selectedFilm.id
+      );
 
       console.log(
         "Sample showtimes before film filter:",
         list.slice(0, 5).map((s) => ({
           film: s.film,
+          filmId: s.filmId,
+          tmdbId: s.tmdbId,
           cinema: s.cinema,
           date: s.date,
           time: s.time,
         }))
       );
 
-      list = list.filter((s) =>
-        (s.film || "").toLowerCase().includes(needle)
-      );
+      list = list.filter((s) => {
+        const title = (s.film || "").toLowerCase();
+        const titleMatch = needle && title.includes(needle);
+        const tmdbMatch =
+          s.tmdbId != null &&
+          selectedFilm.id != null &&
+          s.tmdbId === selectedFilm.id;
+
+        return titleMatch || tmdbMatch;
+      });
     }
     console.log("After film filter:", list.length);
 

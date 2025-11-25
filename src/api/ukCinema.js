@@ -1,8 +1,8 @@
 // src/api/ukCinema.js
 
-// Call the Netlify function and normalise the data
+// Call the Netlify function and normalise the data for the app
 export async function getShowtimesFromApi() {
-  // 1) Call your Netlify function
+  // Call your Netlify function
   const res = await fetch("/.netlify/functions/ukCinema");
 
   if (!res.ok) {
@@ -14,24 +14,28 @@ export async function getShowtimesFromApi() {
   const raw = await res.json();
   console.log("Raw UK Cinema API data:", raw);
 
-  // Safety: make sure it's an array
-  const rawArray = Array.isArray(raw) ? raw : [];
+  // Some endpoints return an array, some return { data: [...] }
+  const rawArray = Array.isArray(raw) ? raw : Array.isArray(raw.data) ? raw.data : [];
 
-  // 2) Turn raw API objects into the shape your app expects:
-  // { id, film, cinema, date, time, priceValue, price, lat, lng, bookingUrl }
   const normalised = rawArray.map((item, index) => {
-    // Some APIs send nested structures like { showtime, film, cinema }
+    // Many UK Cinema examples use nested objects like:
+    // { showtime: {...}, film: {...}, cinema: {...} }
     const show = item.showtime || item;
     const film = item.film || {};
     const cinema = item.cinema || {};
 
-    // ---- Film / cinema names ----
+    // ---- Film IDs / titles ----
+    const filmId = film.id ?? show.film_id ?? null;
+    const tmdbId = film.tmdb_id ?? null;
+
     const filmTitle =
       film.title ||
+      film.original_title ||
       show.film_title ||
       show.filmName ||
       "Unknown film";
 
+    // ---- Cinema name ----
     const cinemaName =
       cinema.name ||
       show.cinema_name ||
@@ -39,7 +43,6 @@ export async function getShowtimesFromApi() {
       "Unknown cinema";
 
     // ---- Date + time ----
-    // UK Cinema usually has a single datetime like "showing_at"
     const rawDate =
       show.showing_at ||
       show.showingAt ||
@@ -49,14 +52,11 @@ export async function getShowtimesFromApi() {
     const dt = rawDate ? new Date(rawDate) : new Date();
     const safeDt = isNaN(dt.getTime()) ? new Date() : dt;
 
-    // Your app uses:
-    // - "date" as a Date object
-    // - "time" as a "HH:MM" string
-    const date = safeDt;
-    const time = safeDt.toTimeString().slice(0, 5); // e.g. "11:10"
+    const date = safeDt; // the app expects a Date object
+    const time = safeDt.toTimeString().slice(0, 5); // "HH:MM"
 
     // ---- Price ----
-    // UK Cinema API doesn’t give price yet, so we fake one for now
+    // UK Cinema API doesn't give ticket price, so fake one for now
     const basePrice =
       typeof show.price === "number"
         ? show.price
@@ -80,6 +80,8 @@ export async function getShowtimesFromApi() {
     return {
       id: show.id ?? index,
       film: filmTitle,
+      filmId,
+      tmdbId,
       cinema: cinemaName,
       date,
       time,
