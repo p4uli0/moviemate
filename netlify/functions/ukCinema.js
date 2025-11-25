@@ -1,27 +1,31 @@
+// netlify/functions/ukCinema.js
+
 export async function handler(event) {
   const API_KEY = process.env.VITE_UK_CINEMA_API_TOKEN;
 
   if (!API_KEY) {
+    console.error("Missing VITE_UK_CINEMA_API_TOKEN");
     return {
       statusCode: 500,
       body: JSON.stringify({ error: "Missing API key" }),
     };
   }
 
-  // Read lat/lng from the frontend request
   const params = event.queryStringParameters || {};
   const lat = params.lat;
   const lng = params.lng;
 
-  if (!lat || !lng) {
-    return {
-      statusCode: 400,
-      body: JSON.stringify({ error: "Missing lat/lng parameters" }),
-    };
+  let url;
+
+  if (lat && lng) {
+    // Location-aware query (mobile, when we have geolocation)
+    url = `https://uk-cinema-api.co.uk/api/v2/showtimes?latitude=${lat}&longitude=${lng}&radius=25&items=200`;
+  } else {
+    // Fallback if no location: big UK-wide chunk so desktop still gets something
+    url = "https://uk-cinema-api.co.uk/api/v2/showtimes?items=500";
   }
 
-  // Build URL for nearby showtimes only
-  const url = `https://uk-cinema-api.co.uk/api/v2/showtimes?latitude=${lat}&longitude=${lng}&radius=25&items=200`;
+  console.log("Calling UK Cinema API:", url);
 
   try {
     const response = await fetch(url, {
@@ -31,10 +35,17 @@ export async function handler(event) {
       },
     });
 
+    const text = await response.text();
+    console.log("Upstream status:", response.status);
+    console.log("Sample payload:", text.slice(0, 200));
+
     if (!response.ok) {
-      const text = await response.text();
       return {
         statusCode: 500,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
         body: JSON.stringify({
           error: `Upstream error: ${response.status}`,
           payload: text,
@@ -42,19 +53,22 @@ export async function handler(event) {
       };
     }
 
-    const json = await response.json();
-
     return {
       statusCode: 200,
       headers: {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*",
       },
-      body: JSON.stringify(json),
+      body: text,
     };
   } catch (err) {
+    console.error("Netlify ukCinema function error:", err);
     return {
       statusCode: 500,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
       body: JSON.stringify({ error: err.message }),
     };
   }

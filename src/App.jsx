@@ -285,7 +285,7 @@ export default function App() {
   // -------------------------------
   useEffect(() => {
   async function loadShowtimesFromApi() {
-    // If we don't have a location yet, don't call the API
+    // If we don't have a location yet, don't hit the API
     if (!userLocation) {
       console.log("No userLocation yet, skipping UK Cinema API call.");
       return;
@@ -299,51 +299,54 @@ export default function App() {
       console.log("UK Cinema API showtimes for app:", apiShowtimes);
 
       if (Array.isArray(apiShowtimes) && apiShowtimes.length > 0) {
-        setShowtimes(apiShowtimes);
+        setShowtimes(apiShowtimes); // ⬅ replace dummy data with real
       } else {
         console.warn("No showtimes from API, keeping demo data.");
       }
     } catch (err) {
       console.error("UK Cinema API error, keeping demo showtimes:", err);
+      // on error, demo showtimes stay in place
     }
   }
 
   loadShowtimesFromApi();
-}, [userLocation]); // 👈 important: rerun when userLocation changes
+}, [userLocation]); // ⬅ run again when location becomes available
+
 
 
   // -------------------------------
   // Load TMDB movies + geolocation
   // -------------------------------
   useEffect(() => {
-    async function loadMovies() {
-      try {
-        const movies = await getNowPlayingUK();
-        if (!movies.length) throw new Error("empty");
+  async function loadMovies() {
+    try {
+      const movies = await getNowPlayingUK();
+      if (!movies.length) throw new Error("empty");
 
-        setNowPlaying(movies);
-        // IMPORTANT: do not touch showtimes here – they come from UK Cinema API or demo fallback
-      } catch (err) {
-        console.error("TMDB error, falling back to static movies:", err);
-        setNowPlaying(FALLBACK_MOVIES);
-      }
+      setNowPlaying(movies);
+      // don't touch showtimes here
+    } catch (err) {
+      console.error("TMDB error, falling back to static movies:", err);
+      setNowPlaying(FALLBACK_MOVIES);
     }
+  }
 
-    loadMovies();
+  loadMovies();
 
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setUserLocation({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-          });
-          setLocationError("");
-        },
-        () => setLocationError("Location permission denied.")
-      );
-    }
-  }, []);
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
+        setLocationError("");
+      },
+      () => setLocationError("Location permission denied.")
+    );
+  }
+}, []);
+
 
   // -------------------------------
   // Movie click → load TMDB details + scroll
