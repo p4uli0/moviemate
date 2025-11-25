@@ -10,6 +10,7 @@ const CHAIN_LABELS = {
 };
 
 export async function getShowtimesFromApi() {
+  // Netlify function (server-side call to UK Cinema API)
   const res = await fetch("/.netlify/functions/ukCinema");
 
   if (!res.ok) {
@@ -22,7 +23,10 @@ export async function getShowtimesFromApi() {
   try {
     raw = await res.json();
   } catch (e) {
-    console.error("Failed to parse JSON from Netlify ukCinema function:", e);
+    console.error(
+      "Failed to parse JSON from Netlify ukCinema function:",
+      e
+    );
     throw new Error("Invalid JSON from ukCinema function");
   }
 
@@ -80,7 +84,7 @@ export async function getShowtimesFromApi() {
     const date = safeDt;
     const time = safeDt.toTimeString().slice(0, 5); // "HH:MM"
 
-    // ---- Price (fake for now) ----
+    // ---- Price (placeholder for now) ----
     const basePrice =
       typeof show.price === "number"
         ? show.price
@@ -116,7 +120,7 @@ export async function getShowtimesFromApi() {
       id: show.id ?? item.id ?? index,
       film: filmTitle,
       filmId,
-      tmdbId,
+      tmdbId, // ✅ this is what App.jsx uses to match TMDB movie.id
       cinema: cinemaName,
       date,
       time,

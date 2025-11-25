@@ -7,15 +7,12 @@ export async function handler() {
     console.error("Missing VITE_UK_CINEMA_API_TOKEN");
     return {
       statusCode: 500,
-      headers: {
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify({ error: "Missing API key" }),
     };
   }
 
-  // Grab a decent chunk of upcoming UK showtimes.
-  // We let the frontend handle date + radius filtering.
+  // Grab a decent chunk of showtimes nationwide.
+  // Location filtering happens in the frontend.
   const url = "https://uk-cinema-api.co.uk/api/v2/showtimes?items=500";
 
   console.log("Calling UK Cinema API:", url);
