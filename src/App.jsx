@@ -450,14 +450,6 @@ export default function App() {
 
         return titleMatch || tmdbMatch || filmIdMatch;
       });
-
-      // If our matching logic wiped everything out, fall back to the original list
-      if (list.length === 0) {
-        console.warn(
-          "Film filter removed all showtimes – falling back to unfiltered list."
-        );
-        list = preFilmList;
-      }
     }
     console.log("After film filter:", list.length);
 

@@ -1,5 +1,14 @@
 // src/api/ukCinema.js
 
+// Map chain codes to friendly labels
+const CHAIN_LABELS = {
+  odeon_gb: "ODEON",
+  reel: "REEL Cinemas",
+  cineworld_uk: "Cineworld",
+  vue_uk: "Vue",
+  showcase_cinemas_uk: "Showcase Cinemas",
+};
+
 export async function getShowtimesFromApi(lat, lng) {
   // Build URL to Netlify function with lat/lng
   const res = await fetch(
@@ -46,10 +55,11 @@ export async function getShowtimesFromApi(lat, lng) {
 
     // ---- Cinema name ----
     let cinemaName =
-      cinema.name ||
+      cinema.name ||                      // full cinema name if present
       show.cinema_name ||
       show.cinemaName ||
-      show.chain ||
+      CHAIN_LABELS[show.chain] ||         // pretty chain label
+      show.chain ||                       // raw chain code as last resort
       null;
 
     if (!cinemaName) {
