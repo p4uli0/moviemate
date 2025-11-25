@@ -1,7 +1,7 @@
 // ===============================
 // MOVIEMATE – FULL APP FILE
-// WITH: Miles • Trailer popup • Date filters
-// Mobile-first • Dummy UK showtimes
+// TMDB movies + UK Cinema API showtimes
+// Location-aware, date filters, cheapest/nearest
 // ===============================
 
 import { useState, useEffect, useRef } from "react";
@@ -10,9 +10,8 @@ import { getNowPlayingUK, getMovieDetails } from "./api/tmdb.js";
 import AdBanner from "./components/AdBanner.jsx";
 import { getShowtimesFromApi } from "./api/ukCinema";
 
-
 // -------------------------------
-// DEMO CINEMAS – UK CITIES
+// DEMO CINEMAS – UK CITIES (fallback demo generator)
 // -------------------------------
 const DEMO_CINEMAS = [
   // Leeds
@@ -122,7 +121,7 @@ const DEMO_CINEMAS = [
 ];
 
 // -------------------------------
-// FALLBACK MOVIES
+// FALLBACK MOVIES (if TMDB dies)
 // -------------------------------
 const FALLBACK_MOVIES = [
   { id: 99901, title: "Dune: Part Two", poster_path: null, vote_average: 8.4 },
@@ -144,8 +143,8 @@ function distanceMiles(lat1, lon1, lat2, lon2) {
 
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) *
-      Math.cos(lat2 * Math.PI / 180) *
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLon / 2) ** 2;
 
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
@@ -202,7 +201,7 @@ function getDateRange(mode) {
 }
 
 // -------------------------------
-// GENERATE DUMMY SHOWTIMES
+// GENERATE DUMMY SHOWTIMES (fallback only)
 // -------------------------------
 function generateDemoShowtimes(movies) {
   const times = ["11:10", "13:15", "15:45", "18:30", "20:10", "21:30"];
@@ -247,20 +246,22 @@ function generateDemoShowtimes(movies) {
   return out;
 }
 
-// -------------------------------
+// ===============================
 // MAIN APP
-// -------------------------------
+// ===============================
 export default function App() {
   const [nowPlaying, setNowPlaying] = useState(FALLBACK_MOVIES);
-  const [showtimes, setShowtimes] = useState(generateDemoShowtimes(FALLBACK_MOVIES));
+  const [showtimes, setShowtimes] = useState(
+    generateDemoShowtimes(FALLBACK_MOVIES)
+  );
 
-  const [selectedFilm, setSelectedFilm] = useState(null);
+  const [selectedFilm, setSelectedFilm] = useState(null); // full movie object when selected
   const [filmDetails, setFilmDetails] = useState(null);
   const [detailCache, setDetailCache] = useState({});
   const [trailerOpen, setTrailerOpen] = useState(false);
 
-  const [sortMode, setSortMode] = useState("price");
-  const [scope, setScope] = useState("near");
+  const [sortMode, setSortMode] = useState("price"); // "price" | "distance"
+  const [scope, setScope] = useState("near"); // "near" | "all" (UI currently defaults to near)
   const [dateFilter, setDateFilter] = useState("today");
 
   const [userLocation, setUserLocation] = useState(null);
@@ -269,34 +270,32 @@ export default function App() {
   const showtimesRef = useRef(null);
   const moviesRef = useRef(null);
 
-   // Call the UK Cinema API once when the app loads
-  // and replace the dummy showtimes with real ones
+  // -------------------------------
+  // Load UK Cinema API showtimes once on load
+  // -------------------------------
   useEffect(() => {
     async function loadShowtimesFromApi() {
       try {
         const apiShowtimes = await getShowtimesFromApi();
         console.log("UK Cinema API showtimes for app:", apiShowtimes);
 
-        // getShowtimesFromApi already returns objects in the shape:
-        // { id, film, cinema, date, time, priceValue, price, lat, lng, bookingUrl }
-        // so we can plug them straight into the app:
         if (Array.isArray(apiShowtimes) && apiShowtimes.length > 0) {
           setShowtimes(apiShowtimes);
+        } else {
+          console.warn("No showtimes from API, keeping demo data.");
         }
       } catch (err) {
         console.error("UK Cinema API error, keeping demo showtimes:", err);
-        // If it fails, we leave the existing generated demo showtimes in place
+        // fallback: keep existing demo showtimes
       }
     }
 
     loadShowtimesFromApi();
   }, []);
 
-
-
-
-
-  // TMDB load + geo
+  // -------------------------------
+  // Load TMDB movies + geolocation
+  // -------------------------------
   useEffect(() => {
     async function loadMovies() {
       try {
@@ -304,10 +303,10 @@ export default function App() {
         if (!movies.length) throw new Error("empty");
 
         setNowPlaying(movies);
-        setShowtimes(generateDemoShowtimes(movies));
-      } catch {
+        // IMPORTANT: do not touch showtimes here – they come from UK Cinema API
+      } catch (err) {
+        console.error("TMDB error, falling back to static movies:", err);
         setNowPlaying(FALLBACK_MOVIES);
-        setShowtimes(generateDemoShowtimes(FALLBACK_MOVIES));
       }
     }
 
@@ -316,7 +315,10 @@ export default function App() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          setUserLocation({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          });
           setLocationError("");
         },
         () => setLocationError("Location permission denied.")
@@ -324,9 +326,11 @@ export default function App() {
     }
   }, []);
 
+  // -------------------------------
   // Movie click → load TMDB details + scroll
+  // -------------------------------
   async function handleMovieClick(m) {
-    setSelectedFilm(m.title);
+    setSelectedFilm(m); // store full movie object
 
     if (detailCache[m.id]) {
       setFilmDetails(detailCache[m.id]);
@@ -335,7 +339,8 @@ export default function App() {
         const details = await getMovieDetails(m.id);
         setDetailCache((p) => ({ ...p, [m.id]: details }));
         setFilmDetails(details);
-      } catch {
+      } catch (err) {
+        console.error("Error loading film details:", err);
         setFilmDetails(null);
       }
     }
@@ -347,7 +352,7 @@ export default function App() {
     }, 120);
   }
 
-  // FIXED: scroll back properly
+  // Clear film selection + scroll back to movies
   function clearFilm() {
     setSelectedFilm(null);
     setFilmDetails(null);
@@ -358,35 +363,47 @@ export default function App() {
     }, 80);
   }
 
- // FILTER + SORT (with debug logs to see what's happening)
+  // -------------------------------
+  // FILTER + SORT SHOWTIMES
+  // -------------------------------
   const visibleShowtimes = (() => {
-    let list = showtimes;
+    let list = showtimes.slice();
 
     console.log("DEBUG total showtimes:", list.length);
 
-    // add distance
+    // add distance if we have location
     if (userLocation) {
       list = list.map((s) => ({
         ...s,
-        distanceMiles: distanceMiles(
-          userLocation.lat,
-          userLocation.lng,
-          s.lat,
-          s.lng
-        ),
+        distanceMiles:
+          s.lat != null && s.lng != null
+            ? distanceMiles(userLocation.lat, userLocation.lng, s.lat, s.lng)
+            : null,
       }));
     }
 
-    // selected film – make this fuzzy / case-insensitive
+    // FILM FILTER – match showtimes to selected film
     if (selectedFilm) {
-      const needle = selectedFilm.toLowerCase();
+      const needle = (selectedFilm.title || "").toLowerCase();
+      console.log("Filtering for film title:", needle);
+
+      console.log(
+        "Sample showtimes before film filter:",
+        list.slice(0, 5).map((s) => ({
+          film: s.film,
+          cinema: s.cinema,
+          date: s.date,
+          time: s.time,
+        }))
+      );
+
       list = list.filter((s) =>
         (s.film || "").toLowerCase().includes(needle)
       );
     }
     console.log("After film filter:", list.length);
 
-    // date filter
+    // DATE FILTER
     const { start, end } = getDateRange(dateFilter);
     const sKey = normaliseDate(start);
     const eKey = normaliseDate(end);
@@ -397,17 +414,31 @@ export default function App() {
     });
     console.log("After date filter:", list.length);
 
-    // scope (near me / all)
+    // SCOPE: near me vs all (no buttons right now – defaults to near when we have a location)
     if (scope === "near" && userLocation) {
-      list = list.filter((s) => s.distanceMiles <= NEARBY_RADIUS_MILES);
+      list = list.filter(
+        (s) =>
+          typeof s.distanceMiles === "number" &&
+          s.distanceMiles <= NEARBY_RADIUS_MILES
+      );
     }
     console.log("After scope filter:", list.length);
 
-    // sort
-    list = list.slice().sort((a, b) => {
-      if (sortMode === "price") return a.priceValue - b.priceValue;
-      if (!userLocation) return a.priceValue - b.priceValue;
-      return a.distanceMiles - b.distanceMiles;
+    // SORT: cheapest or nearest
+    list = list.sort((a, b) => {
+      if (sortMode === "price") {
+        return a.priceValue - b.priceValue;
+      }
+
+      if (sortMode === "distance" && userLocation) {
+        const da =
+          typeof a.distanceMiles === "number" ? a.distanceMiles : Infinity;
+        const db =
+          typeof b.distanceMiles === "number" ? b.distanceMiles : Infinity;
+        return da - db;
+      }
+
+      return a.priceValue - b.priceValue;
     });
 
     return list;
@@ -418,9 +449,11 @@ export default function App() {
       ? Math.min(...visibleShowtimes.map((x) => x.priceValue))
       : null;
 
+  // ===============================
+  // RENDER
+  // ===============================
   return (
     <div className="app-container">
-
       {/* HEADER */}
       <header className="header">
         <div className="logo">🎬 MovieMate</div>
@@ -484,15 +517,19 @@ export default function App() {
           </button>
         </div>
 
-        {/* FILM DETAILS */}
+        {/* FILM DETAILS HEADER */}
         {selectedFilm && filmDetails && (
           <div className="film-detail-header">
             <div className="film-detail-text">
               <h3 className="film-detail-title">{filmDetails.title}</h3>
 
               <div className="film-detail-meta">
-                {filmDetails.cert && <span className="film-cert">{filmDetails.cert}</span>}
-                <span className="film-rating">★ {filmDetails.vote_average?.toFixed(1)}</span>
+                {filmDetails.cert && (
+                  <span className="film-cert">{filmDetails.cert}</span>
+                )}
+                <span className="film-rating">
+                  ★ {filmDetails.vote_average?.toFixed(1)}
+                </span>
               </div>
 
               {filmDetails.overview && (
@@ -531,26 +568,27 @@ export default function App() {
           </div>
         )}
 
-        {/* SORTING + LOCATION */}
+        {/* SORTING (cheapest / nearest) */}
         <div className="sort-bar">
-        <button
-          className={sortMode === "price" ? "active" : ""}
-          onClick={() => setSortMode("price")}
-        >
-          Cheapest
-        </button>
+          <button
+            className={sortMode === "price" ? "active" : ""}
+            onClick={() => setSortMode("price")}
+          >
+            Cheapest
+          </button>
 
-        <button
-          className={sortMode === "distance" ? "active" : ""}
-          onClick={() => setSortMode("distance")}
-        >
-          Nearest
-        </button>
-      </div>
-
+          <button
+            className={sortMode === "distance" ? "active" : ""}
+            onClick={() => setSortMode("distance")}
+          >
+            Nearest
+          </button>
+        </div>
 
         {/* LOCATION ERROR */}
-        {locationError && <p className="location-error">{locationError}</p>}
+        {locationError && (
+          <p className="location-error">{locationError}</p>
+        )}
 
         {/* SHOWTIME CARDS */}
         <div className="showtime-list">
@@ -558,7 +596,9 @@ export default function App() {
             <div
               key={s.id}
               className={`showtime-card ${
-                cheapest !== null && s.priceValue === cheapest ? "cheapest" : ""
+                cheapest !== null && s.priceValue === cheapest
+                  ? "cheapest"
+                  : ""
               }`}
             >
               <div className="showtime-row-top">
@@ -572,7 +612,9 @@ export default function App() {
               </div>
 
               <div className="showtime-info">
-                <span className="showtime-date">{formatShowDate(s.date)}</span>
+                <span className="showtime-date">
+                  {formatShowDate(s.date)}
+                </span>
                 <span className="showtime-time">{s.time}</span>
                 <span className="showtime-price">{s.price}</span>
 
@@ -626,8 +668,9 @@ export default function App() {
           </div>
         )}
       </section>
+
       {/* ⭐ AD BANNER (Sticky bottom ad) */}
-    <AdBanner />
+      <AdBanner />
     </div>
   );
 }
