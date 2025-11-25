@@ -1,14 +1,16 @@
-// netlify/functions/ukCinema.js
-
 export async function handler(event) {
-  const API_KEY = process.env.UK_CINEMA_API_KEY;
+  // ✅ use the SAME name as Netlify
+  const API_KEY = process.env.VITE_UK_CINEMA_API_TOKEN;
   const url = "https://uk-cinema-api.co.uk/api/v2/showtimes?page=1&items=20";
+
+  console.log("ENV KEY EXISTS?", !!API_KEY);
 
   try {
     const response = await fetch(url, {
       headers: {
         Accept: "application/json",
-        Authorization: `Bearer ${API_KEY}`, // IMPORTANT
+        // Swagger says: Name = Authorization, bearerAuth
+        Authorization: `Bearer ${API_KEY}`,
       },
     });
 
