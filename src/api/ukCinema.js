@@ -1,7 +1,8 @@
 // src/api/ukCinema.js
 
-// 1) Call the Netlify function and get the raw API data
-async function fetchRawShowtimes() {
+// Call the Netlify function and normalise the data
+export async function getShowtimesFromApi() {
+  // 1) Call your Netlify function
   const res = await fetch("/.netlify/functions/ukCinema");
 
   if (!res.ok) {
@@ -10,62 +11,86 @@ async function fetchRawShowtimes() {
     throw new Error(`UK Cinema API failed: ${res.status}`);
   }
 
-  const data = await res.json();
-  console.log("Raw UK Cinema API data:", data);
+  const raw = await res.json();
+  console.log("Raw UK Cinema API data:", raw);
 
-  // data should be an array of 20 items
-  return Array.isArray(data) ? data : [];
-}
+  // Safety: make sure it's an array
+  const rawArray = Array.isArray(raw) ? raw : [];
 
-/**
- * 2) Map raw UK Cinema showtime objects -> MovieMate's showtime format
- *
- * Assumes each element looks like:
- * { showtime: {...}, film: {...}, cinema: {...} }
- */
-function normaliseShowtimes(rawArray) {
-  return rawArray.map((item) => {
-    const st = item.showtime || item;   // fall back to item itself if not nested
+  // 2) Turn raw API objects into the shape your app expects:
+  // { id, film, cinema, date, time, priceValue, price, lat, lng, bookingUrl }
+  const normalised = rawArray.map((item, index) => {
+    // Some APIs send nested structures like { showtime, film, cinema }
+    const show = item.showtime || item;
     const film = item.film || {};
     const cinema = item.cinema || {};
 
+    // ---- Film / cinema names ----
+    const filmTitle =
+      film.title ||
+      show.film_title ||
+      show.filmName ||
+      "Unknown film";
+
+    const cinemaName =
+      cinema.name ||
+      show.cinema_name ||
+      show.cinemaName ||
+      "Unknown cinema";
+
+    // ---- Date + time ----
+    // UK Cinema usually has a single datetime like "showing_at"
+    const rawDate =
+      show.showing_at ||
+      show.showingAt ||
+      show.date ||
+      show.start_time;
+
+    const dt = rawDate ? new Date(rawDate) : new Date();
+    const safeDt = isNaN(dt.getTime()) ? new Date() : dt;
+
+    // Your app uses:
+    // - "date" as a Date object
+    // - "time" as a "HH:MM" string
+    const date = safeDt;
+    const time = safeDt.toTimeString().slice(0, 5); // e.g. "11:10"
+
+    // ---- Price ----
+    // UK Cinema API doesn’t give price yet, so we fake one for now
+    const basePrice =
+      typeof show.price === "number"
+        ? show.price
+        : typeof show.priceValue === "number"
+        ? show.priceValue
+        : 9.99;
+
+    const priceValue = Number(basePrice.toFixed(2));
+
+    // ---- Location ----
+    const lat = show.latitude ?? cinema.latitude ?? null;
+    const lng = show.longitude ?? cinema.longitude ?? null;
+
+    // ---- Booking link ----
+    const bookingUrl =
+      show.booking_link ||
+      cinema.link ||
+      show.bookingUrl ||
+      "#";
+
     return {
-      // IDs
-      id: st.id,
-      filmId: st.film_id ?? film.id,
-      cinemaId: st.cinema_id ?? cinema.id,
-
-      // Labels
-      filmTitle: film.title,
-      cinemaName: cinema.name,
-      chain: st.chain ?? cinema.chain,
-
-      // Times
-      showingAt: st.showing_at,       // ISO datetime from API
-      onSaleFrom: st.on_sale_from,    // optional
-
-      // Location
-      latitude: st.latitude ?? cinema.latitude,
-      longitude: st.longitude ?? cinema.longitude,
-
-      // Booking
-      bookingLink: st.booking_link,
-      soldOut: st.sold_out,
-
-      // Useful extras for later
-      runtimeMins: film.runtime,
-      tmdbId: film.tmdb_id,
-      imdbId: film.imdb_id,
-      cinemaAddress: cinema.address,
-      cinemaLink: cinema.link,
+      id: show.id ?? index,
+      film: filmTitle,
+      cinema: cinemaName,
+      date,
+      time,
+      priceValue,
+      price: `£${priceValue.toFixed(2)}`,
+      lat,
+      lng,
+      bookingUrl,
     };
   });
-}
 
-// 3) Public function App.jsx will use
-export async function getShowtimesFromApi() {
-  const raw = await fetchRawShowtimes();
-  const normalised = normaliseShowtimes(raw);
   console.log("Normalised UK Cinema showtimes:", normalised);
   return normalised;
 }
