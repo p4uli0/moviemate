@@ -6,7 +6,6 @@
 // - When a film is selected, we filter:
 //     1) by TMDB ID
 //     2) fallback: by fuzzy title
-//     3) if still nothing: show nothing (just a message)
 // ===============================
 
 import { useState, useEffect, useRef } from "react";
@@ -22,9 +21,6 @@ const FALLBACK_MOVIES = [
   { id: 99903, title: "Deadpool & Wolverine", poster_path: null, vote_average: 8.1 },
   { id: 99904, title: "The Fall Guy", poster_path: null, vote_average: 7.0 },
 ];
-
-// Distance steps in miles for "near me" logic
-const NEARBY_RADIUS_STEPS = [20, 30, 50, 100];
 
 // -------------------------------
 // Helper functions
@@ -102,10 +98,18 @@ function getDateRange(mode) {
 // Normalise film titles for fuzzy matching
 function normaliseTitle(str) {
   if (!str) return "";
+
   return str
     .toLowerCase()
+    // remove anything in brackets e.g. (12A), (U), (Subtitled)
+    .replace(/\([^)]*\)/g, " ")
+    // treat dashes/colons as word boundaries
+    .replace(/[-:–—]/g, " ")
+    // remove common junk words and rating codes
+    .replace(/\b(3d|2d|imax|the movie|movie|film|u|pg|12a|12|15|18)\b/g, "")
+    // strip anything that's not alphanumeric
     .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\b(3d|2d|imax|the movie|movie|film)\b/g, "")
+    // collapse spaces
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -156,7 +160,7 @@ export default function App() {
     async function loadShowtimesFromApi() {
       try {
         const apiShowtimes = await getShowtimesFromApi();
-        console.log("Raw UK Cinema API showtimes:", apiShowtimes);
+        console.log("Raw UK Cinema API data:", apiShowtimes);
 
         if (!Array.isArray(apiShowtimes)) {
           console.warn("API returned non-array showtimes.");
@@ -300,7 +304,7 @@ export default function App() {
           };
         });
 
-        console.log("✅ Normalised showtimes:", normalised);
+        console.log("Normalised UK Cinema showtimes:", normalised);
         setShowtimes(normalised);
       } catch (err) {
         console.error("UK Cinema API error:", err);
@@ -384,7 +388,7 @@ export default function App() {
 
     let list = showtimes.slice();
 
-     // 2) Filter by TMDB ID first
+    // 2) Filter by TMDB ID first
     const targetId = selectedFilm.id != null ? String(selectedFilm.id) : null;
 
     console.log("Selected film title:", selectedFilm.title);
@@ -404,23 +408,31 @@ export default function App() {
     // 3) If no TMDB matches, try fuzzy title
     if (byFilm.length === 0) {
       const key = normaliseTitle(selectedFilm.title);
+      console.log("Normalised selected title:", key);
+
       byFilm = list.filter((s) => {
         const t = normaliseTitle(s.film);
-        return t && key && (t.includes(key) || key.includes(t));
+        if (!t) return false;
+        return t === key || t.includes(key) || key.includes(t);
       });
-      console.log("Matched by title fallback:", byFilm.length);
+
+      console.log(
+        "Title fallback matches:",
+        byFilm.length,
+        "for key:",
+        key
+      );
     }
 
-    // 4) If STILL nothing → TEMPORARY FALLBACK: use ALL showtimes
+    // 4) If STILL nothing → show none (better than wrong film)
     if (byFilm.length === 0) {
       console.warn(
-        "⚠ No showtimes matched by tmdbId or title. " +
-          "Temporarily showing ALL showtimes for this date range."
+        "⚠ No showtimes matched by tmdbId or title. Showing none for this film."
       );
-      // Do NOT return []; carry on with `list` unfiltered by film.
-    } else {
-      list = byFilm;
+      return [];
     }
+
+    list = byFilm;
 
     // 5) Filter by date range
     const { start, end } = getDateRange(dateFilter);
@@ -435,7 +447,7 @@ export default function App() {
 
     if (list.length === 0) return [];
 
-    // 6) Add distances if we have location + apply progressive radius
+    // 6) Add distances if we have location (NO radius filtering – just for sorting)
     if (userLocation) {
       list = list.map((s) => ({
         ...s,
@@ -446,32 +458,8 @@ export default function App() {
           s.lng
         ),
       }));
-
-      let filteredByRadius = [];
-      for (const radius of NEARBY_RADIUS_STEPS) {
-        const within = list.filter(
-          (s) =>
-            typeof s.distanceMiles === "number" &&
-            isFinite(s.distanceMiles) &&
-            s.distanceMiles <= radius
-        );
-        if (within.length > 0) {
-          filteredByRadius = within;
-          console.log(
-            `Using radius ${radius} miles, showtimes:`,
-            within.length
-          );
-          break;
-        }
-      }
-
-      // If still nothing even after expanding radius, we just keep the date-filtered list
-      if (filteredByRadius.length > 0) {
-        list = filteredByRadius;
-      }
+      console.log("After distance mapping, showtimes:", list.length);
     }
-
-    console.log("After date + radius filtering, showtimes:", list.length);
 
     // 7) Sort list
     list = list.sort((a, b) => {
