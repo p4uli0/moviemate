@@ -2,10 +2,8 @@
 // MOVIEMATE – MAIN APP
 // TMDB posters + UK Cinema showtimes
 // - Shows ALL now-playing posters
-// - No showtimes until a film is selected
-// - When a film is selected, we filter:
-//     1) by TMDB ID
-//     2) fallback: by fuzzy title
+// - When a film is selected, we show ALL local showtimes
+//   for the chosen date range (not filtered by title – YET)
 // ===============================
 
 import { useState, useEffect, useRef } from "react";
@@ -49,13 +47,13 @@ function distanceMiles(lat1, lon1, lat2, lon2) {
 }
 
 function normaliseDate(d) {
-  const dt = new Date(d);
+  const dt = d instanceof Date ? d : new Date(d);
   dt.setHours(0, 0, 0, 0);
   return dt.getTime();
 }
 
 function formatShowDate(d) {
-  const dt = new Date(d);
+  const dt = d instanceof Date ? d : new Date(d);
   return dt.toLocaleDateString("en-GB", {
     weekday: "short",
     day: "numeric",
@@ -95,31 +93,12 @@ function getDateRange(mode) {
   return { start: today, end: today };
 }
 
-// Normalise film titles for fuzzy matching
-function normaliseTitle(str) {
-  if (!str) return "";
-
-  return str
-    .toLowerCase()
-    // remove anything in brackets e.g. (12A), (U), (Subtitled)
-    .replace(/\([^)]*\)/g, " ")
-    // treat dashes/colons as word boundaries
-    .replace(/[-:–—]/g, " ")
-    // remove common junk words and rating codes
-    .replace(/\b(3d|2d|imax|the movie|movie|film|u|pg|12a|12|15|18)\b/g, "")
-    // strip anything that's not alphanumeric
-    .replace(/[^a-z0-9]+/g, " ")
-    // collapse spaces
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 // ===============================
 // MAIN APP
 // ===============================
 export default function App() {
   const [nowPlaying, setNowPlaying] = useState(FALLBACK_MOVIES);
-  const [showtimes, setShowtimes] = useState([]); // all normalised showtimes from API
+  const [showtimes, setShowtimes] = useState([]); // normalised showtimes from ukCinema.js
 
   const [selectedFilm, setSelectedFilm] = useState(null); // full TMDB movie object
   const [filmDetails, setFilmDetails] = useState(null);
@@ -154,158 +133,19 @@ export default function App() {
   }, []);
 
   // -------------------------------
-  // Load UK Cinema showtimes + NORMALISE
-  // -------------------------------
+  // Load UK Cinema showtimes (already normalised in ukCinema.js)
+// -------------------------------
   useEffect(() => {
     async function loadShowtimesFromApi() {
       try {
         const apiShowtimes = await getShowtimesFromApi();
-        console.log("Raw UK Cinema API data:", apiShowtimes);
+        console.log("Showtimes from API (normalised):", apiShowtimes);
 
-        if (!Array.isArray(apiShowtimes)) {
-          console.warn("API returned non-array showtimes.");
+        if (Array.isArray(apiShowtimes)) {
+          setShowtimes(apiShowtimes);
+        } else {
           setShowtimes([]);
-          return;
         }
-
-        const normalised = apiShowtimes.map((raw, idx) => {
-          // -------- FILM TITLE --------
-          const film =
-            raw.film ||
-            raw.filmTitle ||
-            raw.title ||
-            raw.movieTitle ||
-            raw.movie_title ||
-            (raw.movie && (raw.movie.title || raw.movie.name)) ||
-            "Unknown film";
-
-          // -------- CINEMA NAME --------
-          const cinema =
-            raw.cinema ||
-            raw.cinemaName ||
-            raw.venue ||
-            raw.cinema_name ||
-            (raw.venue && (raw.venue.name || raw.venue.title)) ||
-            "Unknown cinema";
-
-          // -------- DATE & TIME --------
-          const startsAt =
-            raw.startsAt ||
-            raw.start_time ||
-            raw.startTime ||
-            raw.datetime ||
-            raw.showtime ||
-            raw.showTime ||
-            raw.time;
-
-          let dateForFilter = null;
-          let timeForDisplay = "";
-
-          if (startsAt) {
-            const dt = new Date(startsAt);
-            if (!isNaN(dt.getTime())) {
-              dateForFilter = dt.toISOString();
-              timeForDisplay = dt.toTimeString().slice(0, 5); // HH:MM
-            }
-          }
-
-          // fallbacks if API gives separate date/time fields
-          if (!dateForFilter) {
-            const dateRaw = raw.date || raw.showDate;
-            const timeRaw = raw.time || raw.showTime;
-            if (dateRaw) {
-              const dt = new Date(dateRaw);
-              if (!isNaN(dt.getTime())) {
-                dateForFilter = dt.toISOString();
-              }
-            }
-            if (timeRaw && !timeForDisplay) {
-              timeForDisplay = String(timeRaw);
-            }
-          }
-
-          if (!dateForFilter) {
-            // last resort: today, so it doesn't crash filters
-            dateForFilter = new Date().toISOString();
-          }
-
-          // -------- PRICE & PRICE VALUE --------
-          const priceRaw =
-            raw.price ||
-            raw.minPrice ||
-            raw.min_price ||
-            raw.fromPrice ||
-            raw.priceText ||
-            raw.ticketPrice;
-
-          let priceValue = null;
-          if (typeof priceRaw === "number") {
-            priceValue = priceRaw;
-          } else if (typeof priceRaw === "string") {
-            const m = priceRaw.match(/([\d,.]+)/);
-            if (m) {
-              priceValue = parseFloat(m[1].replace(",", ""));
-            }
-          }
-
-          const priceDisplay =
-            typeof priceRaw === "string"
-              ? priceRaw
-              : priceValue != null
-              ? `From £${priceValue.toFixed(2)}`
-              : "See cinema site";
-
-          // -------- BOOKING URL --------
-          const bookingUrl =
-            raw.bookingUrl ||
-            raw.booking_url ||
-            raw.ticketUrl ||
-            raw.ticket_url ||
-            raw.bookingLink ||
-            raw.booking_link ||
-            raw.purchase_url ||
-            raw.remote_url ||
-            null;
-
-          // -------- TMDB ID --------
-          const tmdbId =
-            raw.tmdbId ||
-            raw.tmdb_id ||
-            (raw.movie && (raw.movie.tmdbId || raw.movie.tmdb_id)) ||
-            null;
-
-          // -------- LAT / LNG --------
-          const lat =
-            raw.lat ||
-            raw.latitude ||
-            (raw.cinema && (raw.cinema.lat || raw.cinema.latitude)) ||
-            (raw.venue && (raw.venue.lat || raw.venue.latitude)) ||
-            null;
-
-          const lng =
-            raw.lng ||
-            raw.longitude ||
-            (raw.cinema && (raw.cinema.lng || raw.cinema.longitude)) ||
-            (raw.venue && (raw.venue.lng || raw.venue.longitude)) ||
-            null;
-
-          return {
-            id: raw.id || raw.showtimeId || raw.showtime_id || idx,
-            film,
-            cinema,
-            date: dateForFilter,
-            time: timeForDisplay || "Time TBC",
-            price: priceDisplay,
-            priceValue: priceValue != null ? priceValue : Number.POSITIVE_INFINITY,
-            bookingUrl,
-            tmdbId,
-            lat,
-            lng,
-          };
-        });
-
-        console.log("Normalised UK Cinema showtimes:", normalised);
-        setShowtimes(normalised);
       } catch (err) {
         console.error("UK Cinema API error:", err);
         setShowtimes([]);
@@ -317,7 +157,7 @@ export default function App() {
 
   // -------------------------------
   // Geolocation (for distance only)
-  // -------------------------------
+// -------------------------------
   useEffect(() => {
     if (!navigator.geolocation) {
       setLocationError("Geolocation not supported in this browser.");
@@ -377,64 +217,20 @@ export default function App() {
 
   // -------------------------------
   // FILTER + SORT SHOWTIMES
-  // -------------------------------
+  // NOTE: for now we are NOT filtering by film title/id.
+  // Any selected film just "unlocks" the list.
+// -------------------------------
   const visibleShowtimes = (() => {
-    console.log("DEBUG total normalised showtimes:", showtimes.length);
+    console.log("DEBUG total showtimes:", showtimes.length);
 
-    // 1) No film selected → show nothing
+    // No film selected → keep UX same as before (show message)
     if (!selectedFilm) {
       return [];
     }
 
     let list = showtimes.slice();
 
-    // 2) Filter by TMDB ID first
-    const targetId = selectedFilm.id != null ? String(selectedFilm.id) : null;
-
-    console.log("Selected film title:", selectedFilm.title);
-    console.log(
-      "Sample API film titles:",
-      list.slice(0, 10).map((s) => s.film)
-    );
-
-    let byFilm = [];
-    if (targetId) {
-      byFilm = list.filter(
-        (s) => s.tmdbId != null && String(s.tmdbId) === targetId
-      );
-      console.log("Matched by tmdbId:", byFilm.length);
-    }
-
-    // 3) If no TMDB matches, try fuzzy title
-    if (byFilm.length === 0) {
-      const key = normaliseTitle(selectedFilm.title);
-      console.log("Normalised selected title:", key);
-
-      byFilm = list.filter((s) => {
-        const t = normaliseTitle(s.film);
-        if (!t) return false;
-        return t === key || t.includes(key) || key.includes(t);
-      });
-
-      console.log(
-        "Title fallback matches:",
-        byFilm.length,
-        "for key:",
-        key
-      );
-    }
-
-    // 4) If STILL nothing → show none (better than wrong film)
-    if (byFilm.length === 0) {
-      console.warn(
-        "⚠ No showtimes matched by tmdbId or title. Showing none for this film."
-      );
-      return [];
-    }
-
-    list = byFilm;
-
-    // 5) Filter by date range
+    // 1) Filter by date range
     const { start, end } = getDateRange(dateFilter);
     const sKey = normaliseDate(start);
     const eKey = normaliseDate(end);
@@ -447,7 +243,7 @@ export default function App() {
 
     if (list.length === 0) return [];
 
-    // 6) Add distances if we have location (NO radius filtering – just for sorting)
+    // 2) Add distances if we have location (for sorting only)
     if (userLocation) {
       list = list.map((s) => ({
         ...s,
@@ -461,7 +257,7 @@ export default function App() {
       console.log("After distance mapping, showtimes:", list.length);
     }
 
-    // 7) Sort list
+    // 3) Sort list
     list = list.sort((a, b) => {
       if (sortMode === "price") {
         return a.priceValue - b.priceValue;
@@ -679,7 +475,7 @@ export default function App() {
 
           {selectedFilm && visibleShowtimes.length === 0 && (
             <p className="no-results">
-              No showtimes found near you for this film in this date range.
+              No showtimes found near you in this date range.
             </p>
           )}
 
