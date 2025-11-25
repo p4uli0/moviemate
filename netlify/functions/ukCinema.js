@@ -1,33 +1,35 @@
 export async function handler(event) {
-  // ✅ use the SAME name as Netlify
   const API_KEY = process.env.VITE_UK_CINEMA_API_TOKEN;
-  const url = "https://uk-cinema-api.co.uk/api/v2/showtimes?page=1&items=20";
 
-  console.log("ENV KEY EXISTS?", !!API_KEY);
+  const headers = {
+    Accept: "application/json",
+    Authorization: `Bearer ${API_KEY}`,
+  };
 
-  try {
-    const response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        // Swagger says: Name = Authorization, bearerAuth
-        Authorization: `Bearer ${API_KEY}`,
-      },
-    });
+  let page = 1;
+  let all = [];
+  let keepGoing = true;
 
-    const text = await response.text();
+  while (keepGoing) {
+    const url = `https://uk-cinema-api.co.uk/api/v2/showtimes?page=${page}&items=500`;
+    const response = await fetch(url, { headers });
 
-    return {
-      statusCode: response.status,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
-      body: text,
-    };
-  } catch (err) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: err.message }),
-    };
+    const json = await response.json();
+
+    if (Array.isArray(json) && json.length > 0) {
+      all = all.concat(json);
+      page++;
+    } else {
+      keepGoing = false;
+    }
   }
+
+  return {
+    statusCode: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+    },
+    body: JSON.stringify(all),
+  };
 }

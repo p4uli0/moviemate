@@ -382,9 +382,11 @@ export default function App() {
       }));
     }
 
-   // FILM FILTER – match showtimes to selected film (by TMDB id and title)
+     // FILM FILTER – try to match, but never leave us with 0 results
     if (selectedFilm) {
       const needle = (selectedFilm.title || "").toLowerCase();
+      const preFilmList = list.slice(); // keep a copy so we can fall back
+
       console.log(
         "Filtering for film title:",
         needle,
@@ -394,7 +396,7 @@ export default function App() {
 
       console.log(
         "Sample showtimes before film filter:",
-        list.slice(0, 5).map((s) => ({
+        preFilmList.slice(0, 5).map((s) => ({
           film: s.film,
           filmId: s.filmId,
           tmdbId: s.tmdbId,
@@ -404,16 +406,40 @@ export default function App() {
         }))
       );
 
-      list = list.filter((s) => {
-        const title = (s.film || "").toLowerCase();
-        const titleMatch = needle && title.includes(needle);
+      list = preFilmList.filter((s) => {
+        const title = (
+          s.film ||
+          s.title ||
+          s.film_title ||
+          s.original_title ||
+          ""
+        ).toLowerCase();
+
+        const titleMatch =
+          needle &&
+          title &&
+          (title.includes(needle) || needle.includes(title));
+
         const tmdbMatch =
           s.tmdbId != null &&
           selectedFilm.id != null &&
-          s.tmdbId === selectedFilm.id;
+          String(s.tmdbId) === String(selectedFilm.id);
 
-        return titleMatch || tmdbMatch;
+        const filmIdMatch =
+          s.filmId != null &&
+          selectedFilm.id != null &&
+          String(s.filmId) === String(selectedFilm.id);
+
+        return titleMatch || tmdbMatch || filmIdMatch;
       });
+
+      // If our matching logic wiped everything out, fall back to the original list
+      if (list.length === 0) {
+        console.warn(
+          "Film filter removed all showtimes – falling back to unfiltered list."
+        );
+        list = preFilmList;
+      }
     }
     console.log("After film filter:", list.length);
 
