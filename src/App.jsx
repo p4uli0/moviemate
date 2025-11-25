@@ -358,49 +358,10 @@ export default function App() {
     }, 80);
   }
 
-  // FILTER + SORT
+ // TEMP: show all showtimes without filters, just to debug
   const visibleShowtimes = (() => {
-    let list = showtimes;
-
-    // add distance
-    if (userLocation) {
-      list = list.map((s) => ({
-        ...s,
-        distanceMiles: distanceMiles(
-          userLocation.lat,
-          userLocation.lng,
-          s.lat,
-          s.lng
-        ),
-      }));
-    }
-
-    // selected film
-    if (selectedFilm) list = list.filter((s) => s.film === selectedFilm);
-
-    // date
-    const { start, end } = getDateRange(dateFilter);
-    const sKey = normaliseDate(start);
-    const eKey = normaliseDate(end);
-
-    list = list.filter((s) => {
-      const k = normaliseDate(s.date);
-      return k >= sKey && k <= eKey;
-    });
-
-    // scope
-    if (scope === "near" && userLocation) {
-      list = list.filter((s) => s.distanceMiles <= NEARBY_RADIUS_MILES);
-    }
-
-    // sort
-    list = list.slice().sort((a, b) => {
-      if (sortMode === "price") return a.priceValue - b.priceValue;
-      if (!userLocation) return a.priceValue - b.priceValue;
-      return a.distanceMiles - b.distanceMiles;
-    });
-
-    return list;
+    console.log("DEBUG: showtimes in state:", showtimes);
+    return showtimes;
   })();
 
   const cheapest =
