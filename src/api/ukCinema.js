@@ -1,9 +1,8 @@
 // src/api/ukCinema.js
 
-// Call the Netlify function, NOT the UK Cinema API directly
-export async function getCinemasByPostcode(postcode) {
-  const qs = new URLSearchParams({ postcode }).toString();
-  const res = await fetch(`/.netlify/functions/ukCinema?${qs}`);
+// Call the Netlify function that proxies UK Cinema API
+export async function getTestShowtimes() {
+  const res = await fetch("/.netlify/functions/ukCinema");
 
   if (!res.ok) {
     const text = await res.text();

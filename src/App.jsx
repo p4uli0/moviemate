@@ -8,7 +8,8 @@ import { useState, useEffect, useRef } from "react";
 import "./index.css";
 import { getNowPlayingUK, getMovieDetails } from "./api/tmdb.js";
 import AdBanner from "./components/AdBanner.jsx";
-import { getCinemasByPostcode } from "./api/ukCinema";
+import { getTestShowtimes } from "./api/ukCinema";
+
 
 
 
@@ -271,17 +272,19 @@ export default function App() {
   const moviesRef = useRef(null);
 
     // Test UK Cinema API on load
-  useEffect(() => {
+      useEffect(() => {
     async function testAPI() {
       try {
-        const data = await getCinemasByPostcode("HU1");
+        const data = await getTestShowtimes();
         console.log("UK Cinema API test:", data);
       } catch (err) {
         console.error("UK Cinema API error:", err);
       }
     }
+
     testAPI();
   }, []);
+
 
   // TMDB load + geo
   useEffect(() => {
