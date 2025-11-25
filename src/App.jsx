@@ -229,6 +229,8 @@ function generateDemoShowtimes(movies) {
           out.push({
             id: id++,
             film: movie.title,
+            filmId: null,
+            tmdbId: null,
             cinema: cin.name,
             date,
             time: t,
@@ -246,6 +248,14 @@ function generateDemoShowtimes(movies) {
   return out;
 }
 
+// Helper to normalise film titles for comparison
+function normaliseTitle(str) {
+  return (str || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 // ===============================
 // MAIN APP
 // ===============================
@@ -261,7 +271,7 @@ export default function App() {
   const [trailerOpen, setTrailerOpen] = useState(false);
 
   const [sortMode, setSortMode] = useState("price"); // "price" | "distance"
-  const [scope, setScope] = useState("near"); // "near" | "all" (UI currently defaults to near)
+  const [scope, setScope] = useState("near"); // "near" | "all"
   const [dateFilter, setDateFilter] = useState("today");
 
   const [userLocation, setUserLocation] = useState(null);
@@ -303,7 +313,7 @@ export default function App() {
         if (!movies.length) throw new Error("empty");
 
         setNowPlaying(movies);
-        // IMPORTANT: do not touch showtimes here – they come from UK Cinema API
+        // IMPORTANT: do not touch showtimes here – they come from UK Cinema API or demo fallback
       } catch (err) {
         console.error("TMDB error, falling back to static movies:", err);
         setNowPlaying(FALLBACK_MOVIES);
@@ -382,14 +392,14 @@ export default function App() {
       }));
     }
 
-     // FILM FILTER – try to match, but never leave us with 0 results
+    // FILM FILTER – try to match, but never leave us with 0 results
     if (selectedFilm) {
-      const needle = (selectedFilm.title || "").toLowerCase();
+      const filmKey = normaliseTitle(selectedFilm.title);
       const preFilmList = list.slice(); // keep a copy so we can fall back
 
       console.log(
         "Filtering for film title:",
-        needle,
+        filmKey,
         "TMDB id:",
         selectedFilm.id
       );
@@ -407,18 +417,14 @@ export default function App() {
       );
 
       list = preFilmList.filter((s) => {
-        const title = (
-          s.film ||
-          s.title ||
-          s.film_title ||
-          s.original_title ||
-          ""
-        ).toLowerCase();
+        const title = normaliseTitle(
+          s.film || s.title || s.film_title || s.original_title || ""
+        );
+
+        if (!filmKey || !title) return false;
 
         const titleMatch =
-          needle &&
-          title &&
-          (title.includes(needle) || needle.includes(title));
+          title.includes(filmKey) || filmKey.includes(title);
 
         const tmdbMatch =
           s.tmdbId != null &&
@@ -454,7 +460,7 @@ export default function App() {
     });
     console.log("After date filter:", list.length);
 
-    // SCOPE: near me vs all (no buttons right now – defaults to near when we have a location)
+    // SCOPE: near me vs all
     if (scope === "near" && userLocation) {
       list = list.filter(
         (s) =>

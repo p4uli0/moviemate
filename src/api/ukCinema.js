@@ -1,8 +1,27 @@
 // src/api/ukCinema.js
 
 // Call the Netlify function and normalise the data for the app
+// Shape returned to App.jsx:
+//
+// [
+//   {
+//     id,
+//     film,        // string – film title
+//     filmId,      // UK Cinema film id (if present)
+//     tmdbId,      // TMDB id (if present)
+//     cinema,      // string – cinema name
+//     date,        // Date object
+//     time,        // "HH:MM"
+//     priceValue,  // number
+//     price,       // "£X.XX"
+//     lat,         // number | null
+//     lng,         // number | null
+//     bookingUrl,  // string
+//   },
+//   ...
+// ]
+
 export async function getShowtimesFromApi() {
-  // Call your Netlify function
   const res = await fetch("/.netlify/functions/ukCinema");
 
   if (!res.ok) {
@@ -11,22 +30,33 @@ export async function getShowtimesFromApi() {
     throw new Error(`UK Cinema API failed: ${res.status}`);
   }
 
-  const raw = await res.json();
+  let raw;
+  try {
+    raw = await res.json();
+  } catch (e) {
+    console.error("Failed to parse JSON from Netlify ukCinema function:", e);
+    throw new Error("Invalid JSON from ukCinema function");
+  }
+
   console.log("Raw UK Cinema API data:", raw);
 
-  // Some endpoints return an array, some return { data: [...] }
-  const rawArray = Array.isArray(raw) ? raw : Array.isArray(raw.data) ? raw.data : [];
+  // Some APIs return an array directly, some wrap it in { data: [...] }
+  const rawArray = Array.isArray(raw)
+    ? raw
+    : Array.isArray(raw?.data)
+    ? raw.data
+    : [];
 
+  // Normalise to the shape the app expects
   const normalised = rawArray.map((item, index) => {
-    // Many UK Cinema examples use nested objects like:
-    // { showtime: {...}, film: {...}, cinema: {...} }
+    // Many responses look like: { showtime: {...}, film: {...}, cinema: {...} }
     const show = item.showtime || item;
     const film = item.film || {};
     const cinema = item.cinema || {};
 
     // ---- Film IDs / titles ----
     const filmId = film.id ?? show.film_id ?? null;
-    const tmdbId = film.tmdb_id ?? null;
+    const tmdbId = film.tmdb_id ?? show.tmdb_id ?? null;
 
     const filmTitle =
       film.title ||
@@ -52,11 +82,11 @@ export async function getShowtimesFromApi() {
     const dt = rawDate ? new Date(rawDate) : new Date();
     const safeDt = isNaN(dt.getTime()) ? new Date() : dt;
 
-    const date = safeDt; // the app expects a Date object
+    const date = safeDt; // keep as Date object
     const time = safeDt.toTimeString().slice(0, 5); // "HH:MM"
 
     // ---- Price ----
-    // UK Cinema API doesn't give ticket price, so fake one for now
+    // UK Cinema API doesn't give ticket price in many cases, so we fake one if needed
     const basePrice =
       typeof show.price === "number"
         ? show.price
@@ -67,8 +97,14 @@ export async function getShowtimesFromApi() {
     const priceValue = Number(basePrice.toFixed(2));
 
     // ---- Location ----
-    const lat = show.latitude ?? cinema.latitude ?? null;
-    const lng = show.longitude ?? cinema.longitude ?? null;
+    const lat =
+      show.latitude ??
+      cinema.latitude ??
+      (typeof show.lat === "number" ? show.lat : null);
+    const lng =
+      show.longitude ??
+      cinema.longitude ??
+      (typeof show.lng === "number" ? show.lng : null);
 
     // ---- Booking link ----
     const bookingUrl =
@@ -78,7 +114,7 @@ export async function getShowtimesFromApi() {
       "#";
 
     return {
-      id: show.id ?? index,
+      id: show.id ?? item.id ?? index,
       film: filmTitle,
       filmId,
       tmdbId,
