@@ -150,21 +150,158 @@ export default function App() {
   }, []);
 
   // -------------------------------
-  // Load UK Cinema showtimes
+  // Load UK Cinema showtimes + NORMALISE
   // -------------------------------
   useEffect(() => {
     async function loadShowtimesFromApi() {
       try {
         const apiShowtimes = await getShowtimesFromApi();
-        console.log("UK Cinema API showtimes for app:", apiShowtimes);
+        console.log("Raw UK Cinema API showtimes:", apiShowtimes);
 
-        if (Array.isArray(apiShowtimes)) {
-          console.log("✅ Using API showtimes, count:", apiShowtimes.length);
-          setShowtimes(apiShowtimes);
-        } else {
+        if (!Array.isArray(apiShowtimes)) {
           console.warn("API returned non-array showtimes.");
           setShowtimes([]);
+          return;
         }
+
+        const normalised = apiShowtimes.map((raw, idx) => {
+          // -------- FILM TITLE --------
+          const film =
+            raw.film ||
+            raw.filmTitle ||
+            raw.title ||
+            raw.movieTitle ||
+            raw.movie_title ||
+            (raw.movie && (raw.movie.title || raw.movie.name)) ||
+            "Unknown film";
+
+          // -------- CINEMA NAME --------
+          const cinema =
+            raw.cinema ||
+            raw.cinemaName ||
+            raw.venue ||
+            raw.cinema_name ||
+            (raw.venue && (raw.venue.name || raw.venue.title)) ||
+            "Unknown cinema";
+
+          // -------- DATE & TIME --------
+          const startsAt =
+            raw.startsAt ||
+            raw.start_time ||
+            raw.startTime ||
+            raw.datetime ||
+            raw.showtime ||
+            raw.showTime ||
+            raw.time;
+
+          let dateForFilter = null;
+          let timeForDisplay = "";
+
+          if (startsAt) {
+            const dt = new Date(startsAt);
+            if (!isNaN(dt.getTime())) {
+              dateForFilter = dt.toISOString();
+              timeForDisplay = dt.toTimeString().slice(0, 5); // HH:MM
+            }
+          }
+
+          // fallbacks if API gives separate date/time fields
+          if (!dateForFilter) {
+            const dateRaw = raw.date || raw.showDate;
+            const timeRaw = raw.time || raw.showTime;
+            if (dateRaw) {
+              const dt = new Date(dateRaw);
+              if (!isNaN(dt.getTime())) {
+                dateForFilter = dt.toISOString();
+              }
+            }
+            if (timeRaw && !timeForDisplay) {
+              timeForDisplay = String(timeRaw);
+            }
+          }
+
+          if (!dateForFilter) {
+            // last resort: today, so it doesn't crash filters
+            dateForFilter = new Date().toISOString();
+          }
+
+          // -------- PRICE & PRICE VALUE --------
+          const priceRaw =
+            raw.price ||
+            raw.minPrice ||
+            raw.min_price ||
+            raw.fromPrice ||
+            raw.priceText ||
+            raw.ticketPrice;
+
+          let priceValue = null;
+          if (typeof priceRaw === "number") {
+            priceValue = priceRaw;
+          } else if (typeof priceRaw === "string") {
+            const m = priceRaw.match(/([\d,.]+)/);
+            if (m) {
+              priceValue = parseFloat(m[1].replace(",", ""));
+            }
+          }
+
+          const priceDisplay =
+            typeof priceRaw === "string"
+              ? priceRaw
+              : priceValue != null
+              ? `From £${priceValue.toFixed(2)}`
+              : "See cinema site";
+
+          // -------- BOOKING URL --------
+          const bookingUrl =
+            raw.bookingUrl ||
+            raw.booking_url ||
+            raw.ticketUrl ||
+            raw.ticket_url ||
+            raw.bookingLink ||
+            raw.booking_link ||
+            raw.purchase_url ||
+            raw.remote_url ||
+            null;
+
+          // -------- TMDB ID --------
+          const tmdbId =
+            raw.tmdbId ||
+            raw.tmdb_id ||
+            (raw.movie && (raw.movie.tmdbId || raw.movie.tmdb_id)) ||
+            null;
+
+          // -------- LAT / LNG --------
+          const lat =
+            raw.lat ||
+            raw.latitude ||
+            (raw.cinema && (raw.cinema.lat || raw.cinema.latitude)) ||
+            (raw.venue && (raw.venue.lat || raw.venue.latitude)) ||
+            null;
+
+          const lng =
+            raw.lng ||
+            raw.longitude ||
+            (raw.cinema && (raw.cinema.lng || raw.cinema.longitude)) ||
+            (raw.venue && (raw.venue.lng || raw.venue.longitude)) ||
+            null;
+
+          return {
+            id: raw.id || raw.showtimeId || raw.showtime_id || idx,
+            film,
+            cinema,
+            date: dateForFilter,
+            time: timeForDisplay || "Time TBC",
+            price: priceDisplay,
+            priceValue: priceValue != null ? priceValue : Number.POSITIVE_INFINITY,
+            bookingUrl,
+            tmdbId,
+            lat,
+            lng,
+          };
+        });
+
+        console.log("✅ Normalised showtimes:", normalised);
+        setShowtimes(normalised);
       } catch (err) {
         console.error("UK Cinema API error:", err);
         setShowtimes([]);
@@ -238,7 +375,7 @@ export default function App() {
   // FILTER + SORT SHOWTIMES
   // -------------------------------
   const visibleShowtimes = (() => {
-    console.log("DEBUG total showtimes:", showtimes.length);
+    console.log("DEBUG total normalised showtimes:", showtimes.length);
 
     // 1) No film selected → show nothing
     if (!selectedFilm) {
@@ -536,7 +673,7 @@ export default function App() {
               </div>
 
               <a
-                href={s.bookingUrl}
+                href={s.bookingUrl || "#"}
                 target="_blank"
                 rel="noreferrer"
                 className="book-btn"
