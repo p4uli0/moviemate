@@ -10,6 +10,8 @@ import { getNowPlayingUK, getMovieDetails } from "./api/tmdb.js";
 import AdBanner from "./components/AdBanner.jsx";
 import { getShowtimesFromApi } from "./api/ukCinema";
 
+const [showtimes, setShowtimes] = useState([]);
+
 
 // -------------------------------
 // DEMO CINEMAS – UK CITIES
@@ -202,50 +204,39 @@ function getDateRange(mode) {
 }
 
 // -------------------------------
-// GENERATE DUMMY SHOWTIMES
+// UK CINEMA API SHOWTIMES
 // -------------------------------
-function generateDemoShowtimes(movies) {
-  const times = ["11:10", "13:15", "15:45", "18:30", "20:10", "21:30"];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+useEffect(() => {
+  async function loadUKData() {
+    try {
+      const raw = await fetchUKCinemaShowtimes();
+      console.log("Raw UK Cinema API data: ", raw);
 
-  let id = 1;
-  const out = [];
+      const normalised = raw.map(item => ({
+        id: item.id,
+        film: item.film_id,
+        cinema: item.cinema_id,
+        date: item.showing_at,
+        time: new Date(item.showing_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        priceValue: 9.99, // Temporary until API includes price
+        price: "£9.99",
+        lat: item.latitude,
+        lng: item.longitude,
+        bookingUrl: item.booking_link,
+        chain: item.chain
+      }));
 
-  movies.forEach((movie, mIndex) => {
-    DEMO_CINEMAS.forEach((cin, cIndex) => {
-      for (let d = 0; d < DAYS_AHEAD; d++) {
-        const date = new Date(today);
-        date.setDate(today.getDate() + d);
+      console.log("Normalised UK Cinema showtimes:", normalised);
+      setShowtimes(normalised);
 
-        const showCount = 2 + ((mIndex + cIndex + d) % 3);
+    } catch (err) {
+      console.error("UK Cinema API failed:", err);
+    }
+  }
 
-        for (let i = 0; i < showCount; i++) {
-          const tIndex = (i + d + mIndex) % times.length;
-          const t = times[tIndex];
+  loadUKData();
+}, []);
 
-          const variance = (Math.random() - 0.5) * 2;
-          const priceValue = Number((cin.basePrice + variance).toFixed(2));
-
-          out.push({
-            id: id++,
-            film: movie.title,
-            cinema: cin.name,
-            date,
-            time: t,
-            priceValue,
-            price: `£${priceValue.toFixed(2)}`,
-            lat: cin.lat,
-            lng: cin.lng,
-            bookingUrl: cin.bookingUrl,
-          });
-        }
-      }
-    });
-  });
-
-  return out;
-}
 
 // -------------------------------
 // MAIN APP
