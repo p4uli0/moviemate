@@ -5,6 +5,7 @@
 // - When selected: description, cert, rating, trailer + showtimes
 // - Showtimes filtered by date + radius cascade (20→30→50→100)
 // - Sort by cheapest / nearest
+// - Uses TMDB IDs from UK Cinema API where possible
 // ===============================
 
 import { useState, useEffect, useRef, useMemo } from "react";
@@ -290,13 +291,24 @@ export default function App() {
 
   // -------------------------------
   // Derived: films that actually have showtimes
-  // -------------------------------
+  // (match by TMDB id first, fall back to fuzzy title)
+// -------------------------------
   const localMovies = useMemo(() => {
     if (!nowPlaying.length || !filteredShowtimes.length) return [];
 
     return nowPlaying.filter((movie) => {
       const mTitle = movie.title || "";
-      return filteredShowtimes.some((s) => titlesMatch(mTitle, s.film));
+      const mId = movie.id;
+
+      return filteredShowtimes.some((s) => {
+        const tmdbMatch =
+          s.tmdbId != null && mId != null &&
+          String(s.tmdbId) === String(mId);
+
+        const titleMatch = titlesMatch(mTitle, s.film || "");
+
+        return tmdbMatch || titleMatch;
+      });
     });
   }, [nowPlaying, filteredShowtimes]);
 
@@ -338,19 +350,28 @@ export default function App() {
 
   // -------------------------------
   // Visible showtimes (only after a film is selected)
+  // Match by TMDB id first, then title
   // -------------------------------
   const visibleShowtimes = useMemo(() => {
-    // No film selected → no showtimes
     if (!selectedFilm) return [];
 
     let list = filteredShowtimes.slice();
-
-    // Filter to this film only (by title)
     const filmTitle = selectedFilm.title || "";
+    const filmId = selectedFilm.id;
 
-    list = list.filter((s) => titlesMatch(filmTitle, s.film));
+    list = list.filter((s) => {
+      const tmdbMatch =
+        s.tmdbId != null &&
+        filmId != null &&
+        String(s.tmdbId) === String(filmId);
+
+      const titleMatch = titlesMatch(filmTitle, s.film || "");
+
+      return tmdbMatch || titleMatch;
+    });
+
     console.log(
-      `Showtimes after film filter for "${filmTitle}":`,
+      `Showtimes after film filter for "${filmTitle}" (id ${filmId}):`,
       list.length
     );
 
