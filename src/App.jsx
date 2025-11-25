@@ -6,7 +6,7 @@
 // - When a film is selected, we filter:
 //     1) by TMDB ID
 //     2) fallback: by fuzzy title
-//     3) last resort: show all showtimes
+//     3) if still nothing: show nothing (just a message)
 // ===============================
 
 import { useState, useEffect, useRef } from "react";
@@ -269,12 +269,12 @@ export default function App() {
       console.log("Matched by title fallback:", byFilm.length);
     }
 
-    // 4) If STILL nothing, last resort: show everything (so user isn't staring at a blank page)
+    // 4) If STILL nothing → really nothing. Do NOT show random showtimes.
     if (byFilm.length === 0) {
       console.log(
-        "⚠️ No film match by tmdbId or title – falling back to ALL showtimes for now."
+        "❌ No showtimes match this film by tmdbId or title."
       );
-      byFilm = list;
+      return [];
     }
 
     list = byFilm;
@@ -304,7 +304,7 @@ export default function App() {
         ),
       }));
 
-      let filteredByRadius = list;
+      let filteredByRadius = [];
       for (const radius of NEARBY_RADIUS_STEPS) {
         const within = list.filter(
           (s) =>
@@ -321,7 +321,11 @@ export default function App() {
           break;
         }
       }
-      list = filteredByRadius;
+
+      // If still nothing even after expanding radius, we just keep the date-filtered list
+      if (filteredByRadius.length > 0) {
+        list = filteredByRadius;
+      }
     }
 
     console.log("After date + radius filtering, showtimes:", list.length);
@@ -510,11 +514,13 @@ export default function App() {
               <div className="showtime-row-top">
                 <h4 className="cinema-name">{s.cinema}</h4>
 
-                {userLocation && s.distanceMiles != null && isFinite(s.distanceMiles) && (
-                  <p className="distance-text">
-                    {s.distanceMiles.toFixed(1)} miles away
-                  </p>
-                )}
+                {userLocation &&
+                  s.distanceMiles != null &&
+                  isFinite(s.distanceMiles) && (
+                    <p className="distance-text">
+                      {s.distanceMiles.toFixed(1)} miles away
+                    </p>
+                  )}
               </div>
 
               <div className="showtime-info">
@@ -542,7 +548,7 @@ export default function App() {
 
           {selectedFilm && visibleShowtimes.length === 0 && (
             <p className="no-results">
-              No showtimes found for this film and date range.
+              No showtimes found near you for this film in this date range.
             </p>
           )}
 
