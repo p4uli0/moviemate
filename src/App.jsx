@@ -233,37 +233,121 @@ export default function App() {
   // FILTER + SORT SHOWTIMES
   // -------------------------------
   const visibleShowtimes = (() => {
-    // ❗ KEY CHANGE 1: no film selected → no showtimes at all
-    if (!selectedFilm) {
-      console.log("No film selected → no showtimes.");
-      return [];
-    }
+  // No film selected → no showtimes
+  if (!selectedFilm) {
+    console.log("No film selected → no showtimes.");
+    return [];
+  }
 
-    let list = showtimes.slice();
-    console.log("DEBUG total showtimes:", list.length);
+  let list = showtimes.slice();
+  console.log("DEBUG total showtimes:", list.length);
 
-    // Add distance if we have location
-    if (userLocation) {
-      list = list.map((s) => ({
-        ...s,
-        distanceMiles:
-          s.lat != null && s.lng != null
-            ? distanceMiles(userLocation.lat, userLocation.lng, s.lat, s.lng)
-            : null,
-      }));
-    }
+  if (!list.length) {
+    console.log("No showtimes loaded from API yet.");
+    return [];
+  }
 
-    // ❗ KEY CHANGE 2: film filter = fuzzy title ONLY for now
-    const filmKey = normaliseTitle(selectedFilm.title);
-    list = list.filter((s) => {
-      const title = normaliseTitle(
-        s.film || s.title || s.film_title || s.original_title || ""
+  // Add distance if we have location
+  if (userLocation) {
+    list = list.map((s) => ({
+      ...s,
+      distanceMiles:
+        s.lat != null && s.lng != null
+          ? distanceMiles(userLocation.lat, userLocation.lng, s.lat, s.lng)
+          : null,
+    }));
+  }
+
+  // --- FILM FILTER with fallback ---
+  const filmKey = normaliseTitle(selectedFilm.title);
+  const beforeFilmFilter = list;
+
+  let filteredByTitle = list.filter((s) => {
+    const title = normaliseTitle(
+      s.film || s.title || s.film_title || s.original_title || ""
+    );
+    return title && filmKey && (title.includes(filmKey) || filmKey.includes(title));
+  });
+
+  console.log(
+    "After film-title filter:",
+    filteredByTitle.length,
+    "for",
+    selectedFilm.title
+  );
+
+  // If title matching wipes out everything, FALL BACK to all showtimes
+  if (filteredByTitle.length === 0) {
+    console.warn(
+      "Film title filter removed all showtimes – falling back to unfiltered list (debug)."
+    );
+    list = beforeFilmFilter;
+  } else {
+    list = filteredByTitle;
+  }
+
+  // --- DATE FILTER ---
+  const { start, end } = getDateRange(dateFilter);
+  const sKey = normaliseDate(start);
+  const eKey = normaliseDate(end);
+
+  list = list.filter((s) => {
+    const k = normaliseDate(s.date);
+    return k >= sKey && k <= eKey;
+  });
+  console.log("After date filter:", list.length);
+
+  if (!list.length) return [];
+
+  // --- RADIUS FALLBACK (if we have location) ---
+  if (userLocation) {
+    let chosen = list;
+    let usedRadius = null;
+
+    for (const r of RADIUS_STEPS_MILES) {
+      const near = list.filter(
+        (s) =>
+          typeof s.distanceMiles === "number" &&
+          s.distanceMiles <= r
       );
-      return title && filmKey && (title.includes(filmKey) || filmKey.includes(title));
-    });
+      if (near.length > 0) {
+        chosen = near;
+        usedRadius = r;
+        break;
+      }
+    }
 
-    console.log("After film-title filter:", list.length);
-    if (list.length === 0) return [];
+    console.log(
+      "After radius filter, used radius:",
+      usedRadius,
+      "count:",
+      chosen.length
+    );
+
+    list = chosen;
+    if (!list.length) return [];
+  }
+
+  // --- SORT: cheapest or nearest ---
+  list = list.sort((a, b) => {
+    if (sortMode === "price") {
+      return a.priceValue - b.priceValue;
+    }
+
+    if (sortMode === "distance" && userLocation) {
+      const da =
+        typeof a.distanceMiles === "number" ? a.distanceMiles : Infinity;
+      const db =
+        typeof b.distanceMiles === "number" ? b.distanceMiles : Infinity;
+      return da - db;
+    }
+
+    return a.priceValue - b.priceValue;
+  });
+
+  return list;
+})();
+
 
     // Date filter
     const { start, end } = getDateRange(dateFilter);
