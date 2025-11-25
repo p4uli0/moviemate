@@ -269,19 +269,61 @@ export default function App() {
   const showtimesRef = useRef(null);
   const moviesRef = useRef(null);
 
- // Call the UK Cinema API once when the app loads
+  // Call the UK Cinema API once when the app loads
+  // and replace the dummy showtimes with real ones
   useEffect(() => {
     async function loadShowtimesFromApi() {
       try {
-        const data = await getShowtimesFromApi();
-        console.log("UK Cinema API test:", data);
+        const apiShowtimes = await getShowtimesFromApi();
+        console.log("UK Cinema API test:", apiShowtimes);
+
+        // Map API showtimes -> shape used by generateDemoShowtimes()
+        const mapped = apiShowtimes.map((s, index) => {
+          // Try to get a usable Date from the API
+          const rawDate =
+            s.showingAt || s.showing_at || s.date || new Date().toISOString();
+          const dt = new Date(rawDate);
+          const safeDt = isNaN(dt.getTime()) ? new Date() : dt;
+
+          // Our UI expects a Date object and a "HH:MM" string
+          const date = safeDt;
+          const time = safeDt.toTimeString().slice(0, 5); // e.g. "11:10"
+
+          // Temporary price logic until the API gives real prices
+          const priceValue =
+            typeof s.priceValue === "number"
+              ? s.priceValue
+              : typeof s.price === "number"
+              ? s.price
+              : 9.99;
+
+          return {
+            // These keys match what generateDemoShowtimes() produces
+            id: s.id ?? index,
+            film: s.filmTitle || s.film || "Unknown film",
+            cinema: s.cinemaName || s.cinema || "Unknown cinema",
+            date,
+            time,
+            priceValue,
+            price: `£${priceValue.toFixed(2)}`,
+            lat: s.latitude ?? s.lat,
+            lng: s.longitude ?? s.lng,
+            bookingUrl: s.bookingLink || s.bookingUrl || "#",
+          };
+        });
+
+        console.log("Mapped showtimes for UI:", mapped);
+        // 🔥 This switches the app from dummy data to real API data
+        setShowtimes(mapped);
       } catch (err) {
-        console.error("UK Cinema API error:", err);
+        console.error("UK Cinema API error, keeping demo showtimes:", err);
+        // On error we do nothing: the dummy showtimes stay in place
       }
     }
 
     loadShowtimesFromApi();
   }, []);
+
 
 
   // TMDB load + geo
