@@ -21,8 +21,12 @@
 //   ...
 // ]
 
-export async function getShowtimesFromApi() {
-  const res = await fetch("/.netlify/functions/ukCinema");
+export async function getShowtimesFromApi(lat, lng) {
+
+  const res = await fetch(
+  `/.netlify/functions/ukCinema?lat=${lat}&lng=${lng}`
+);
+
 
   if (!res.ok) {
     const text = await res.text();
