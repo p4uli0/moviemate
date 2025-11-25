@@ -8,9 +8,7 @@ import { useState, useEffect, useRef } from "react";
 import "./index.css";
 import { getNowPlayingUK, getMovieDetails } from "./api/tmdb.js";
 import AdBanner from "./components/AdBanner.jsx";
-import { getTestShowtimes } from "./api/ukCinema";
-
-
+import { getShowtimesFromApi } from "./api/ukCinema";
 
 
 // -------------------------------
@@ -271,19 +269,20 @@ export default function App() {
   const showtimesRef = useRef(null);
   const moviesRef = useRef(null);
 
-    // Test UK Cinema API on load
-      useEffect(() => {
-    async function testAPI() {
+  // 🔹 Call the UK Cinema API once when the app loads
+  useEffect(() => {
+    async function loadShowtimesFromApi() {
       try {
-        const data = await getTestShowtimes();
-        console.log("UK Cinema API test:", data);
+        const data = await getShowtimesFromApi();
+        console.log("UK Cinema API test:", data);  // 👈 you'll see this in the Console
       } catch (err) {
         console.error("UK Cinema API error:", err);
       }
     }
 
-    testAPI();
+    loadShowtimesFromApi();
   }, []);
+
 
 
   // TMDB load + geo
