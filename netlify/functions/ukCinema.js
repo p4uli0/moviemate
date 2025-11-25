@@ -1,6 +1,6 @@
 // netlify/functions/ukCinema.js
 
-export async function handler(event) {
+export async function handler() {
   const API_KEY = process.env.VITE_UK_CINEMA_API_TOKEN;
 
   if (!API_KEY) {
@@ -11,21 +11,8 @@ export async function handler(event) {
     };
   }
 
-  const params = event.queryStringParameters || {};
-  const lat = params.lat;
-  const lng = params.lng;
-
-  if (!lat || !lng) {
-    console.error("Missing lat/lng parameters");
-    return {
-      statusCode: 400,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Missing lat/lng parameters" }),
-    };
-  }
-
-  // Location-aware showtimes – radius + item count you can tweak later
-  const url = `https://uk-cinema-api.co.uk/api/v2/showtimes?latitude=${lat}&longitude=${lng}&radius=25&items=200`;
+  // 👇 No lat/lng, just grab a big chunk of UK showtimes
+  const url = "https://uk-cinema-api.co.uk/api/v2/showtimes?items=500";
 
   console.log("Calling UK Cinema API:", url);
 

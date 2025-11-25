@@ -302,31 +302,27 @@ export default function App() {
   // Load UK Cinema API showtimes once we have a location
   // -------------------------------
   useEffect(() => {
-    async function loadShowtimesFromApi() {
-      if (!userLocation) {
-        console.log("No userLocation yet, skipping UK Cinema API call.");
-        return;
-      }
+  async function loadShowtimesFromApi() {
+    try {
+      const apiShowtimes = await getShowtimesFromApi();
+      console.log("UK Cinema API showtimes for app:", apiShowtimes);
 
-      try {
-        const apiShowtimes = await getShowtimesFromApi(
-          userLocation.lat,
-          userLocation.lng
+      if (Array.isArray(apiShowtimes)) {
+        console.log(
+          "✅ Using API showtimes, count:",
+          apiShowtimes.length
         );
-        console.log("UK Cinema API showtimes for app:", apiShowtimes);
-
-        if (Array.isArray(apiShowtimes) && apiShowtimes.length > 0) {
-          setShowtimes(apiShowtimes); // replace dummy with real data
-        } else {
-          console.warn("No showtimes from API, keeping demo data.");
-        }
-      } catch (err) {
-        console.error("UK Cinema API error, keeping demo showtimes:", err);
+        setShowtimes(apiShowtimes); // always use API result, even if empty
+      } else {
+        console.warn("API returned non-array, keeping demo data.");
       }
+    } catch (err) {
+      console.error("UK Cinema API error, keeping demo showtimes:", err);
     }
+  }
 
-    loadShowtimesFromApi();
-  }, [userLocation]);
+  loadShowtimesFromApi();
+  }, []); // ⬅ runs once on load
 
   // -------------------------------
   // Movie click → load TMDB details + scroll

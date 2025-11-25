@@ -9,11 +9,9 @@ const CHAIN_LABELS = {
   showcase_cinemas_uk: "Showcase Cinemas",
 };
 
-export async function getShowtimesFromApi(lat, lng) {
-  // Call Netlify function with lat/lng
-  const res = await fetch(
-    `/.netlify/functions/ukCinema?lat=${lat}&lng=${lng}`
-  );
+export async function getShowtimesFromApi() {
+  // 👇 No lat/lng here – just call the Netlify function
+  const res = await fetch("/.netlify/functions/ukCinema");
 
   if (!res.ok) {
     const text = await res.text();
@@ -42,7 +40,7 @@ export async function getShowtimesFromApi(lat, lng) {
     const film = item.film || {};
     const cinema = item.cinema || {};
 
-    // ---- Film IDs / titles (we're NOT going to filter by these yet) ----
+    // ---- Film IDs / titles ----
     const filmId = film.id ?? show.film_id ?? null;
     const tmdbId = film.tmdb_id ?? show.tmdb_id ?? null;
 
