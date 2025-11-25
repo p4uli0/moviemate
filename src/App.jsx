@@ -384,14 +384,19 @@ export default function App() {
 
     let list = showtimes.slice();
 
-    // 2) Filter by TMDB ID first
+     // 2) Filter by TMDB ID first
     const targetId = selectedFilm.id != null ? String(selectedFilm.id) : null;
+
+    console.log("Selected film title:", selectedFilm.title);
+    console.log(
+      "Sample API film titles:",
+      list.slice(0, 10).map((s) => s.film)
+    );
 
     let byFilm = [];
     if (targetId) {
       byFilm = list.filter(
-        (s) =>
-          s.tmdbId != null && String(s.tmdbId) === targetId
+        (s) => s.tmdbId != null && String(s.tmdbId) === targetId
       );
       console.log("Matched by tmdbId:", byFilm.length);
     }
@@ -406,15 +411,16 @@ export default function App() {
       console.log("Matched by title fallback:", byFilm.length);
     }
 
-    // 4) If STILL nothing → really nothing. Do NOT show random showtimes.
+    // 4) If STILL nothing → TEMPORARY FALLBACK: use ALL showtimes
     if (byFilm.length === 0) {
-      console.log(
-        "❌ No showtimes match this film by tmdbId or title."
+      console.warn(
+        "⚠ No showtimes matched by tmdbId or title. " +
+          "Temporarily showing ALL showtimes for this date range."
       );
-      return [];
+      // Do NOT return []; carry on with `list` unfiltered by film.
+    } else {
+      list = byFilm;
     }
-
-    list = byFilm;
 
     // 5) Filter by date range
     const { start, end } = getDateRange(dateFilter);
