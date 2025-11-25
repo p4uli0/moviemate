@@ -1,7 +1,8 @@
 // ===============================
-// MOVIEMATE – FULL APP FILE
+// MOVIEMATE – FULL APP (API version)
 // TMDB movies + UK Cinema API showtimes
 // Location-aware, date filters, cheapest/nearest
+// 👉 For now, showtimes are NOT filtered by film
 // ===============================
 
 import { useState, useEffect, useRef } from "react";
@@ -11,7 +12,7 @@ import AdBanner from "./components/AdBanner.jsx";
 import { getShowtimesFromApi } from "./api/ukCinema";
 
 // -------------------------------
-// DEMO CINEMAS – UK CITIES (fallback demo generator)
+// DEMO CINEMAS – fallback dummy data
 // -------------------------------
 const DEMO_CINEMAS = [
   // Leeds
@@ -121,7 +122,7 @@ const DEMO_CINEMAS = [
 ];
 
 // -------------------------------
-// FALLBACK MOVIES (if TMDB dies)
+// FALLBACK MOVIES
 // -------------------------------
 const FALLBACK_MOVIES = [
   { id: 99901, title: "Dune: Part Two", poster_path: null, vote_average: 8.4 },
@@ -134,7 +135,7 @@ const NEARBY_RADIUS_MILES = 20;
 const DAYS_AHEAD = 7;
 
 // -------------------------------
-// MILES DISTANCE (Haversine)
+// Helpers
 // -------------------------------
 function distanceMiles(lat1, lon1, lat2, lon2) {
   const R = 3958.8; // miles
@@ -165,9 +166,6 @@ function formatShowDate(d) {
   });
 }
 
-// -------------------------------
-// DATE RANGE LOGIC
-// -------------------------------
 function getDateRange(mode) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -200,9 +198,7 @@ function getDateRange(mode) {
   return { start: today, end: today };
 }
 
-// -------------------------------
-// GENERATE DUMMY SHOWTIMES (fallback only)
-// -------------------------------
+// Generate demo showtimes for fallback
 function generateDemoShowtimes(movies) {
   const times = ["11:10", "13:15", "15:45", "18:30", "20:10", "21:30"];
   const today = new Date();
@@ -229,8 +225,6 @@ function generateDemoShowtimes(movies) {
           out.push({
             id: id++,
             film: movie.title,
-            filmId: null,
-            tmdbId: null,
             cinema: cin.name,
             date,
             time: t,
@@ -248,14 +242,6 @@ function generateDemoShowtimes(movies) {
   return out;
 }
 
-// Helper to normalise film titles for comparison
-function normaliseTitle(str) {
-  return (str || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
 // ===============================
 // MAIN APP
 // ===============================
@@ -265,7 +251,7 @@ export default function App() {
     generateDemoShowtimes(FALLBACK_MOVIES)
   );
 
-  const [selectedFilm, setSelectedFilm] = useState(null); // full movie object when selected
+  const [selectedFilm, setSelectedFilm] = useState(null);
   const [filmDetails, setFilmDetails] = useState(null);
   const [detailCache, setDetailCache] = useState({});
   const [trailerOpen, setTrailerOpen] = useState(false);
@@ -281,78 +267,72 @@ export default function App() {
   const moviesRef = useRef(null);
 
   // -------------------------------
-  // Load UK Cinema API showtimes once on load
-  // -------------------------------
-  useEffect(() => {
-  async function loadShowtimesFromApi() {
-    // If we don't have a location yet, don't hit the API
-    if (!userLocation) {
-      console.log("No userLocation yet, skipping UK Cinema API call.");
-      return;
-    }
-
-    try {
-      const apiShowtimes = await getShowtimesFromApi(
-        userLocation.lat,
-        userLocation.lng
-      );
-      console.log("UK Cinema API showtimes for app:", apiShowtimes);
-
-      if (Array.isArray(apiShowtimes) && apiShowtimes.length > 0) {
-        setShowtimes(apiShowtimes); // ⬅ replace dummy data with real
-      } else {
-        console.warn("No showtimes from API, keeping demo data.");
-      }
-    } catch (err) {
-      console.error("UK Cinema API error, keeping demo showtimes:", err);
-      // on error, demo showtimes stay in place
-    }
-  }
-
-  loadShowtimesFromApi();
-}, [userLocation]); // ⬅ run again when location becomes available
-
-
-
-  // -------------------------------
   // Load TMDB movies + geolocation
   // -------------------------------
   useEffect(() => {
-  async function loadMovies() {
-    try {
-      const movies = await getNowPlayingUK();
-      if (!movies.length) throw new Error("empty");
+    async function loadMovies() {
+      try {
+        const movies = await getNowPlayingUK();
+        if (!movies.length) throw new Error("empty");
 
-      setNowPlaying(movies);
-      // don't touch showtimes here
-    } catch (err) {
-      console.error("TMDB error, falling back to static movies:", err);
-      setNowPlaying(FALLBACK_MOVIES);
+        setNowPlaying(movies);
+      } catch (err) {
+        console.error("TMDB error, falling back to static movies:", err);
+        setNowPlaying(FALLBACK_MOVIES);
+      }
     }
-  }
 
-  loadMovies();
+    loadMovies();
 
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setUserLocation({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        });
-        setLocationError("");
-      },
-      () => setLocationError("Location permission denied.")
-    );
-  }
-}, []);
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setUserLocation({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          });
+          setLocationError("");
+        },
+        () => setLocationError("Location permission denied.")
+      );
+    }
+  }, []);
 
+  // -------------------------------
+  // Load UK Cinema API showtimes once we have a location
+  // -------------------------------
+  useEffect(() => {
+    async function loadShowtimesFromApi() {
+      if (!userLocation) {
+        console.log("No userLocation yet, skipping UK Cinema API call.");
+        return;
+      }
+
+      try {
+        const apiShowtimes = await getShowtimesFromApi(
+          userLocation.lat,
+          userLocation.lng
+        );
+        console.log("UK Cinema API showtimes for app:", apiShowtimes);
+
+        if (Array.isArray(apiShowtimes) && apiShowtimes.length > 0) {
+          setShowtimes(apiShowtimes); // replace dummy with real data
+        } else {
+          console.warn("No showtimes from API, keeping demo data.");
+        }
+      } catch (err) {
+        console.error("UK Cinema API error, keeping demo showtimes:", err);
+      }
+    }
+
+    loadShowtimesFromApi();
+  }, [userLocation]);
 
   // -------------------------------
   // Movie click → load TMDB details + scroll
   // -------------------------------
   async function handleMovieClick(m) {
-    setSelectedFilm(m); // store full movie object
+    setSelectedFilm(m); // full movie object
 
     if (detailCache[m.id]) {
       setFilmDetails(detailCache[m.id]);
@@ -374,7 +354,6 @@ export default function App() {
     }, 120);
   }
 
-  // Clear film selection + scroll back to movies
   function clearFilm() {
     setSelectedFilm(null);
     setFilmDetails(null);
@@ -387,13 +366,14 @@ export default function App() {
 
   // -------------------------------
   // FILTER + SORT SHOWTIMES
+  // 👉 IMPORTANT: no film filter for now
   // -------------------------------
   const visibleShowtimes = (() => {
     let list = showtimes.slice();
 
     console.log("DEBUG total showtimes:", list.length);
 
-    // add distance if we have location
+    // Add distance if we have location
     if (userLocation) {
       list = list.map((s) => ({
         ...s,
@@ -403,55 +383,6 @@ export default function App() {
             : null,
       }));
     }
-
-    // FILM FILTER – try to match, but never leave us with 0 results
-    if (selectedFilm) {
-      const filmKey = normaliseTitle(selectedFilm.title);
-      const preFilmList = list.slice(); // keep a copy so we can fall back
-
-      console.log(
-        "Filtering for film title:",
-        filmKey,
-        "TMDB id:",
-        selectedFilm.id
-      );
-
-      console.log(
-        "Sample showtimes before film filter:",
-        preFilmList.slice(0, 5).map((s) => ({
-          film: s.film,
-          filmId: s.filmId,
-          tmdbId: s.tmdbId,
-          cinema: s.cinema,
-          date: s.date,
-          time: s.time,
-        }))
-      );
-
-      list = preFilmList.filter((s) => {
-        const title = normaliseTitle(
-          s.film || s.title || s.film_title || s.original_title || ""
-        );
-
-        if (!filmKey || !title) return false;
-
-        const titleMatch =
-          title.includes(filmKey) || filmKey.includes(title);
-
-        const tmdbMatch =
-          s.tmdbId != null &&
-          selectedFilm.id != null &&
-          String(s.tmdbId) === String(selectedFilm.id);
-
-        const filmIdMatch =
-          s.filmId != null &&
-          selectedFilm.id != null &&
-          String(s.filmId) === String(selectedFilm.id);
-
-        return titleMatch || tmdbMatch || filmIdMatch;
-      });
-    }
-    console.log("After film filter:", list.length);
 
     // DATE FILTER
     const { start, end } = getDateRange(dateFilter);
@@ -543,7 +474,7 @@ export default function App() {
 
       {/* SHOWTIMES */}
       <section className="showtimes-section" ref={showtimesRef}>
-        <h2 className="section-title-small">Showtimes</h2>
+        <h2 className="section-title-small">Showtimes near you</h2>
 
         {/* DATE FILTERS */}
         <div className="date-filter-bar">
@@ -618,7 +549,7 @@ export default function App() {
           </div>
         )}
 
-        {/* SORTING (cheapest / nearest) */}
+        {/* SORTING */}
         <div className="sort-bar">
           <button
             className={sortMode === "price" ? "active" : ""}

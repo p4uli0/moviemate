@@ -10,7 +10,7 @@ const CHAIN_LABELS = {
 };
 
 export async function getShowtimesFromApi(lat, lng) {
-  // Build URL to Netlify function with lat/lng
+  // Call Netlify function with lat/lng
   const res = await fetch(
     `/.netlify/functions/ukCinema?lat=${lat}&lng=${lng}`
   );
@@ -42,7 +42,7 @@ export async function getShowtimesFromApi(lat, lng) {
     const film = item.film || {};
     const cinema = item.cinema || {};
 
-    // ---- Film IDs / titles ----
+    // ---- Film IDs / titles (we're NOT going to filter by these yet) ----
     const filmId = film.id ?? show.film_id ?? null;
     const tmdbId = film.tmdb_id ?? show.tmdb_id ?? null;
 
@@ -55,11 +55,11 @@ export async function getShowtimesFromApi(lat, lng) {
 
     // ---- Cinema name ----
     let cinemaName =
-      cinema.name ||                      // full cinema name if present
+      cinema.name ||
       show.cinema_name ||
       show.cinemaName ||
-      CHAIN_LABELS[show.chain] ||         // pretty chain label
-      show.chain ||                       // raw chain code as last resort
+      CHAIN_LABELS[show.chain] ||
+      show.chain ||
       null;
 
     if (!cinemaName) {

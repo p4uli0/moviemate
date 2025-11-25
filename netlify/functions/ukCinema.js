@@ -15,15 +15,17 @@ export async function handler(event) {
   const lat = params.lat;
   const lng = params.lng;
 
-  let url;
-
-  if (lat && lng) {
-    // Location-aware query (mobile, when we have geolocation)
-    url = `https://uk-cinema-api.co.uk/api/v2/showtimes?latitude=${lat}&longitude=${lng}&radius=25&items=200`;
-  } else {
-    // Fallback if no location: big UK-wide chunk so desktop still gets something
-    url = "https://uk-cinema-api.co.uk/api/v2/showtimes?items=500";
+  if (!lat || !lng) {
+    console.error("Missing lat/lng parameters");
+    return {
+      statusCode: 400,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "Missing lat/lng parameters" }),
+    };
   }
+
+  // Location-aware showtimes – radius + item count you can tweak later
+  const url = `https://uk-cinema-api.co.uk/api/v2/showtimes?latitude=${lat}&longitude=${lng}&radius=25&items=200`;
 
   console.log("Calling UK Cinema API:", url);
 
@@ -41,15 +43,12 @@ export async function handler(event) {
 
     if (!response.ok) {
       return {
-        statusCode: 500,
+        statusCode: response.status,
         headers: {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
         },
-        body: JSON.stringify({
-          error: `Upstream error: ${response.status}`,
-          payload: text,
-        }),
+        body: text,
       };
     }
 
