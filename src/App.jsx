@@ -1,18 +1,16 @@
-// src/App.jsx
-// ==================================================================
-// MOVIEMATE – MINIMAL "NEAR ME" VERSION
-// - Ignores ./api/ukCinema.js completely
-// - Calls /.netlify/functions/ukCinema directly
-// - Derives films + showtimes from raw API data
-// - No TMDB, no posters — just make the logic WORK
-// ==================================================================
+// ===============================
+// MOVIEMATE – FULL PRODUCTION APP
+// TMDB + UK Cinema API (joined backend)
+// ===============================
 
-import { useEffect, useRef, useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import "./index.css";
+import { getNowPlayingUK, getMovieDetails } from "./api/tmdb.js";
+import { getShowtimesFromApi } from "./api/ukCinema.js";
 import AdBanner from "./components/AdBanner.jsx";
 
 // -------------------------------
-// Helper: distance in miles
+// Helper functions
 // -------------------------------
 function distanceMiles(lat1, lon1, lat2, lon2) {
   if (
@@ -24,7 +22,7 @@ function distanceMiles(lat1, lon1, lat2, lon2) {
     return Infinity;
   }
 
-  const R = 3958.8; // miles
+  const R = 3958.8;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
 
@@ -38,13 +36,13 @@ function distanceMiles(lat1, lon1, lat2, lon2) {
 }
 
 function normaliseDate(d) {
-  const dt = d instanceof Date ? d : new Date(d);
+  const dt = new Date(d);
   dt.setHours(0, 0, 0, 0);
   return dt.getTime();
 }
 
 function formatShowDate(d) {
-  const dt = d instanceof Date ? d : new Date(d);
+  const dt = new Date(d);
   return dt.toLocaleDateString("en-GB", {
     weekday: "short",
     day: "numeric",
@@ -56,9 +54,7 @@ function getDateRange(mode) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  if (mode === "today") {
-    return { start: today, end: today };
-  }
+  if (mode === "today") return { start: today, end: today };
 
   if (mode === "7days") {
     const end = new Date(today);
@@ -84,260 +80,31 @@ function getDateRange(mode) {
   return { start: today, end: today };
 }
 
-// -------------------------------
-// Deep search helpers
-// -------------------------------
-function isProbablyUrl(str) {
-  return /https?:\/\//i.test(str) || /\bwww\./i.test(str);
-}
-
-// recursive search for a string that looks like a film title
-function findTitleDeep(obj, depth = 0, maxDepth = 4) {
-  if (!obj || typeof obj !== "object" || depth > maxDepth) return null;
-
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      const found = findTitleDeep(item, depth + 1, maxDepth);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === "string") {
-      const lowerKey = key.toLowerCase();
-      const looksLikeTitleKey =
-        /film|title|movie|name/i.test(lowerKey);
-      const looksLikeTitleValue =
-        value.length > 3 &&
-        /\D/.test(value) && // not pure numbers
-        !isProbablyUrl(value);
-
-      if (looksLikeTitleKey && looksLikeTitleValue) {
-        return value;
-      }
-    }
-  }
-
-  // fallback: any decent-looking string
-  for (const value of Object.values(obj)) {
-    if (typeof value === "string") {
-      if (
-        value.length > 3 &&
-        /\s/.test(value) && // has a space
-        !isProbablyUrl(value)
-      ) {
-        return value;
-      }
-    }
-  }
-
-  // recurse into child objects
-  for (const value of Object.values(obj)) {
-    if (value && typeof value === "object") {
-      const found = findTitleDeep(value, depth + 1, maxDepth);
-      if (found) return found;
-    }
-  }
-
-  return null;
-}
-
-function findCinemaDeep(obj, depth = 0, maxDepth = 4) {
-  if (!obj || typeof obj !== "object" || depth > maxDepth) return null;
-
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      const found = findCinemaDeep(item, depth + 1, maxDepth);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === "string") {
-      const lowerKey = key.toLowerCase();
-      const matchesKey =
-        /cinema|venue|theatre|theater|location|site/i.test(lowerKey);
-      if (matchesKey && value.length > 1 && !isProbablyUrl(value)) {
-        return value;
-      }
-    }
-  }
-
-  // fallback: nothing
-  return null;
-}
-
-function findBookingUrlDeep(obj, depth = 0, maxDepth = 4) {
-  if (!obj || typeof obj !== "object" || depth > maxDepth) return null;
-
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      const found = findBookingUrlDeep(item, depth + 1, maxDepth);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === "string") {
-      const lowerKey = key.toLowerCase();
-      const keyMatches =
-        /book|ticket|url|link/i.test(lowerKey);
-      if (keyMatches && isProbablyUrl(value)) {
-        return value;
-      }
-    }
-  }
-
-  // fallback: any URL-looking string
-  for (const value of Object.values(obj)) {
-    if (typeof value === "string" && isProbablyUrl(value)) {
-      return value;
-    }
-  }
-
-  for (const value of Object.values(obj)) {
-    if (value && typeof value === "object") {
-      const found = findBookingUrlDeep(value, depth + 1, maxDepth);
-      if (found) return found;
-    }
-  }
-
-  return null;
-}
-
-function findLatLngDeep(obj, depth = 0, maxDepth = 4) {
-  if (!obj || typeof obj !== "object" || depth > maxDepth) {
-    return { lat: null, lng: null };
-  }
-
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      const found = findLatLngDeep(item, depth + 1, maxDepth);
-      if (found.lat != null && found.lng != null) return found;
-    }
-    return { lat: null, lng: null };
-  }
-
-  let lat = null;
-  let lng = null;
-
-  for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === "number") {
-      const lowerKey = key.toLowerCase();
-      if (/lat/.test(lowerKey)) lat = value;
-      if (/lng|lon|long/.test(lowerKey)) lng = value;
-    }
-  }
-
-  if (lat != null && lng != null) return { lat, lng };
-
-  for (const value of Object.values(obj)) {
-    if (value && typeof value === "object") {
-      const found = findLatLngDeep(value, depth + 1, maxDepth);
-      if (found.lat != null && found.lng != null) return found;
-    }
-  }
-
-  return { lat: null, lng: null };
-}
-
-function findDateDeep(obj, depth = 0, maxDepth = 4) {
-  if (!obj || typeof obj !== "object" || depth > maxDepth) return null;
-
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      const found = findDateDeep(item, depth + 1, maxDepth);
-      if (found) return found;
-    }
-    return null;
-  }
-
-  for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === "string") {
-      const lowerKey = key.toLowerCase();
-      const keyMatches =
-        /showing|start|time|date|datetime/i.test(lowerKey);
-      if (keyMatches) {
-        const dt = new Date(value);
-        if (!isNaN(dt.getTime())) return dt;
-      }
-    }
-  }
-
-  // fallback: any ISO-looking string
-  for (const value of Object.values(obj)) {
-    if (typeof value === "string") {
-      if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-        const dt = new Date(value);
-        if (!isNaN(dt.getTime())) return dt;
-      }
-    }
-  }
-
-  for (const value of Object.values(obj)) {
-    if (value && typeof value === "object") {
-      const found = findDateDeep(value, depth + 1, maxDepth);
-      if (found) return found;
-    }
-  }
-
-  return null;
-}
-
-function findPriceDeep(obj, depth = 0, maxDepth = 4) {
-  if (!obj || typeof obj !== "object" || depth > maxDepth) return null;
-
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      const found = findPriceDeep(item, depth + 1, maxDepth);
-      if (found != null) return found;
-    }
-    return null;
-  }
-
-  for (const [key, value] of Object.entries(obj)) {
-    const lowerKey = key.toLowerCase();
-    if (typeof value === "number") {
-      if (/price|cost|amount|fee/i.test(lowerKey)) {
-        return value;
-      }
-    }
-  }
-
-  for (const value of Object.values(obj)) {
-    if (typeof value === "string") {
-      if (/£|\d/.test(value) && !isProbablyUrl(value)) {
-        const m = value.match(/([\d,.]+)/);
-        if (m) {
-          const num = parseFloat(m[1].replace(",", ""));
-          if (!isNaN(num)) return num;
-        }
-      }
-    }
-  }
-
-  for (const value of Object.values(obj)) {
-    if (value && typeof value === "object") {
-      const found = findPriceDeep(value, depth + 1, maxDepth);
-      if (found != null) return found;
-    }
-  }
-
-  return null;
+function normaliseTitle(str) {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(3d|2d|imax|the movie|movie|film)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // ===============================
 // MAIN APP
 // ===============================
 export default function App() {
-  const [showtimes, setShowtimes] = useState([]); // normalised
-  const [films, setFilms] = useState([]);         // derived from showtimes
-  const [selectedFilmKey, setSelectedFilmKey] = useState(null);
+  const [nowPlaying, setNowPlaying] = useState([]);
+  const [showtimes, setShowtimes] = useState([]);
+
+  const [selectedFilm, setSelectedFilm] = useState(null);
+  const [filmDetails, setFilmDetails] = useState(null);
+  const [detailCache, setDetailCache] = useState({});
+
+  const [trailerOpen, setTrailerOpen] = useState(false);
+
+  const [sortMode, setSortMode] = useState("price"); // price | distance
   const [dateFilter, setDateFilter] = useState("today");
-  const [sortMode, setSortMode] = useState("price");
 
   const [userLocation, setUserLocation] = useState(null);
   const [locationError, setLocationError] = useState("");
@@ -346,82 +113,35 @@ export default function App() {
   const showtimesRef = useRef(null);
 
   // -------------------------------
-  // Fetch raw UK Cinema data directly via Netlify function
+  // Load TMDB movies
   // -------------------------------
   useEffect(() => {
-    async function load() {
+    async function loadMovies() {
       try {
-        const res = await fetch("/.netlify/functions/ukCinema");
-        if (!res.ok) {
-          const text = await res.text();
-          console.error("UK Cinema proxy error:", res.status, text);
-          setShowtimes([]);
-          return;
-        }
-
-        const raw = await res.json();
-        const rawArray = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.data)
-          ? raw.data
-          : [];
-
-        // One console just so you know *something* happened
-        console.log("UK Cinema raw rows:", rawArray.length);
-
-        const normalised = rawArray.map((item, index) => {
-          const show = item.showtime || item;
-
-          const filmTitle =
-            findTitleDeep(show) ||
-            findTitleDeep(item) ||
-            "Unknown film";
-
-          const cinemaName =
-            findCinemaDeep(show) ||
-            findCinemaDeep(item) ||
-            "Unknown cinema";
-
-          const dt =
-            findDateDeep(show) ||
-            findDateDeep(item) ||
-            new Date();
-
-          const priceVal =
-            findPriceDeep(show) ||
-            findPriceDeep(item) ||
-            9.99;
-
-          const { lat, lng } =
-            findLatLngDeep(show) || findLatLngDeep(item);
-
-          const bookingUrl =
-            findBookingUrlDeep(show) ||
-            findBookingUrlDeep(item) ||
-            "#";
-
-          return {
-            id: show.id ?? item.id ?? index,
-            film: filmTitle,
-            cinema: cinemaName,
-            date: dt,
-            time: dt.toTimeString().slice(0, 5),
-            priceValue: priceVal,
-            price: `£${priceVal.toFixed(2)}`,
-            lat,
-            lng,
-            bookingUrl,
-          };
-        });
-
-        setShowtimes(normalised);
+        const movies = await getNowPlayingUK();
+        setNowPlaying(movies);
       } catch (err) {
-        console.error("UK Cinema fetch error:", err);
+        console.error("TMDB error:", err);
+        setNowPlaying([]);
+      }
+    }
+    loadMovies();
+  }, []);
+
+  // -------------------------------
+  // Load UK Cinema showtimes
+  // -------------------------------
+  useEffect(() => {
+    async function loadShowtimes() {
+      try {
+        const apiShowtimes = await getShowtimesFromApi();
+        setShowtimes(apiShowtimes);
+      } catch (err) {
+        console.error("UK Cinema load error:", err);
         setShowtimes([]);
       }
     }
-
-    load();
+    loadShowtimes();
   }, []);
 
   // -------------------------------
@@ -441,29 +161,84 @@ export default function App() {
         });
         setLocationError("");
       },
-      (err) => {
-        console.warn("Geolocation error:", err);
+      () => {
         setLocationError("Location permission denied.");
       }
     );
   }, []);
 
   // -------------------------------
-  // Filter showtimes by date + distance, then derive films
+  // When clicking a movie
   // -------------------------------
-  const filteredShowtimes = (() => {
-    if (!showtimes.length) return [];
+  async function handleMovieClick(movie) {
+    setSelectedFilm(movie);
 
+    if (detailCache[movie.id]) {
+      setFilmDetails(detailCache[movie.id]);
+    } else {
+      try {
+        const details = await getMovieDetails(movie.id);
+        setDetailCache((p) => ({ ...p, [movie.id]: details }));
+        setFilmDetails(details);
+      } catch (err) {
+        console.error("Film detail error:", err);
+        setFilmDetails(null);
+      }
+    }
+
+    // scroll to showtimes
+    setTimeout(() => {
+      showtimesRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 150);
+  }
+
+  function clearFilm() {
+    setSelectedFilm(null);
+    setFilmDetails(null);
+    setTrailerOpen(false);
+
+    setTimeout(() => {
+      moviesRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+  }
+
+  // -------------------------------
+  // Build visible showtimes
+  // -------------------------------
+  const visibleShowtimes = (() => {
+    if (!selectedFilm) return [];
+
+    const key = normaliseTitle(selectedFilm.title);
+    let list = [...showtimes];
+
+    // Match by TMDB ID if available
+    let matches = list.filter(
+      (s) =>
+        s.tmdbId &&
+        String(s.tmdbId) === String(selectedFilm.id)
+    );
+
+    // Fallback fuzzy title
+    if (matches.length === 0) {
+      matches = list.filter((s) => {
+        const t = normaliseTitle(s.filmTitle);
+        return t.includes(key) || key.includes(t);
+      });
+    }
+
+    if (matches.length === 0) return [];
+
+    list = matches;
+
+    // Date filter
     const { start, end } = getDateRange(dateFilter);
     const sKey = normaliseDate(start);
     const eKey = normaliseDate(end);
 
-    let list = showtimes.filter((s) => {
+    list = list.filter((s) => {
       const k = normaliseDate(s.date);
       return k >= sKey && k <= eKey;
     });
-
-    if (!list.length) return [];
 
     if (userLocation) {
       list = list.map((s) => ({
@@ -475,94 +250,17 @@ export default function App() {
           s.lng
         ),
       }));
+    }
 
-      const withCoords = list.filter(
-        (s) =>
-          typeof s.distanceMiles === "number" &&
-          isFinite(s.distanceMiles)
-      );
-
-      // 50-mile radius for "near me"
-      const withinRadius = withCoords.filter(
-        (s) => s.distanceMiles <= 50
-      );
-
-      if (withinRadius.length > 0) {
-        list = withinRadius;
+    // Sorting
+    list.sort((a, b) => {
+      if (sortMode === "price") {
+        return a.priceValue - b.priceValue;
       }
-    }
-
-    return list;
-  })();
-
-  useEffect(() => {
-    const map = new Map();
-
-    for (const s of filteredShowtimes) {
-      const normTitle = s.film.trim();
-      if (!normTitle) continue;
-      const key = normTitle.toLowerCase();
-
-      if (!map.has(key)) {
-        map.set(key, {
-          key,
-          title: s.film,
-        });
-      }
-    }
-
-    const filmList = Array.from(map.values());
-    setFilms(filmList);
-
-    if (
-      selectedFilmKey &&
-      !filmList.some((f) => f.key === selectedFilmKey)
-    ) {
-      setSelectedFilmKey(null);
-    }
-  }, [filteredShowtimes, selectedFilmKey]);
-
-  // -------------------------------
-  // Showtimes for selected film
-  // -------------------------------
-  const visibleShowtimes = (() => {
-    if (!selectedFilmKey) return [];
-
-    let list = filteredShowtimes.filter(
-      (s) => s.film.trim().toLowerCase() === selectedFilmKey
-    );
-
-    if (!list.length) return [];
-
-    if (userLocation) {
-      list = list.map((s) => ({
-        ...s,
-        distanceMiles:
-          typeof s.distanceMiles === "number"
-            ? s.distanceMiles
-            : distanceMiles(
-                userLocation.lat,
-                userLocation.lng,
-                s.lat,
-                s.lng
-              ),
-      }));
-    }
-
-    list = list.sort((a, b) => {
       if (sortMode === "distance" && userLocation) {
-        const da =
-          typeof a.distanceMiles === "number"
-            ? a.distanceMiles
-            : Infinity;
-        const db =
-          typeof b.distanceMiles === "number"
-            ? b.distanceMiles
-            : Infinity;
-        return da - db;
+        return (a.distanceMiles || Infinity) - (b.distanceMiles || Infinity);
       }
-
-      return a.priceValue - b.priceValue;
+      return 0;
     });
 
     return list;
@@ -573,55 +271,46 @@ export default function App() {
       ? Math.min(...visibleShowtimes.map((x) => x.priceValue))
       : null;
 
-  const selectedFilmTitle =
-    films.find((f) => f.key === selectedFilmKey)?.title || "";
-
-  // ===============================
+  // -------------------------------
   // RENDER
-  // ===============================
+  // -------------------------------
   return (
     <div className="app-container">
       {/* HEADER */}
       <header className="header">
         <div className="logo">🎬 MovieMate</div>
-        <p className="tagline">What&apos;s on near you</p>
+        <p className="tagline">Find. Compare. Watch</p>
       </header>
 
-      {/* MOVIES GRID – from showtimes */}
+      {/* MOVIES GRID */}
       <section className="now-playing-section" ref={moviesRef}>
-        <h2 className="section-title">
-          Now in cinemas near you
-        </h2>
+        <h2 className="section-title">Now in cinemas near you</h2>
 
         <div className="movies-grid">
-          {films.map((film) => (
+          {nowPlaying.map((m) => (
             <button
-              key={film.key}
+              key={m.id}
               className="movie-card"
-              onClick={() => {
-                setSelectedFilmKey(film.key);
-                setTimeout(() => {
-                  showtimesRef.current?.scrollIntoView({
-                    behavior: "smooth",
-                  });
-                }, 120);
-              }}
+              onClick={() => handleMovieClick(m)}
             >
               <div className="movie-poster-wrapper">
-                {/* Simple colour block instead of poster for now */}
-                <div className="movie-poster placeholder-poster">
-                  {film.title}
+                <img
+                  className="movie-poster"
+                  src={
+                    m.poster_path
+                      ? `https://image.tmdb.org/t/p/w500${m.poster_path}`
+                      : "https://via.placeholder.com/500x750?text=No+Image"
+                  }
+                  alt={m.title}
+                />
+                <div className="movie-rating-pill">
+                  ★ {m.vote_average?.toFixed(1)}
                 </div>
               </div>
+              <p className="movie-name">{m.title}</p>
             </button>
           ))}
         </div>
-
-        {!films.length && (
-          <p className="no-results">
-            No films found near you in this date range.
-          </p>
-        )}
       </section>
 
       {/* SHOWTIMES */}
@@ -650,46 +339,84 @@ export default function App() {
           </button>
         </div>
 
-        {/* SELECTED FILM HEADER */}
-        {selectedFilmKey && (
+        {/* FILM DETAIL HEADER */}
+        {selectedFilm && filmDetails && (
           <div className="film-detail-header">
             <div className="film-detail-text">
               <h3 className="film-detail-title">
-                {selectedFilmTitle}
+                {filmDetails.title}
               </h3>
-              <button
-                className="back-btn"
-                onClick={() => setSelectedFilmKey(null)}
-              >
+
+              <div className="film-detail-meta">
+                {filmDetails.cert && (
+                  <span className="film-cert">{filmDetails.cert}</span>
+                )}
+                <span className="film-rating">
+                  ★ {filmDetails.vote_average?.toFixed(1)}
+                </span>
+              </div>
+
+              {filmDetails.overview && (
+                <p className="film-overview">{filmDetails.overview}</p>
+              )}
+
+              {filmDetails.cast && (
+                <p className="film-cast">
+                  <strong>Cast:</strong>{" "}
+                  {filmDetails.cast.join(", ")}
+                </p>
+              )}
+
+              {filmDetails.trailerUrl && (
+                <button
+                  className="trailer-btn"
+                  onClick={() => setTrailerOpen(true)}
+                >
+                  ▶ View trailer
+                </button>
+              )}
+
+              <button className="back-btn" onClick={clearFilm}>
                 ← Back to all films
               </button>
             </div>
+
+            <img
+              className="film-detail-poster"
+              src={
+                filmDetails.poster_path
+                  ? `https://image.tmdb.org/t/p/w500${filmDetails.poster_path}`
+                  : "https://via.placeholder.com/300x450?text=No+Image"
+              }
+              alt={filmDetails.title}
+            />
           </div>
         )}
 
-        {/* SORTING */}
-        <div className="sort-bar">
-          <button
-            className={sortMode === "price" ? "active" : ""}
-            onClick={() => setSortMode("price")}
-          >
-            Cheapest
-          </button>
+        {/* SORT BAR */}
+        {selectedFilm && (
+          <div className="sort-bar">
+            <button
+              className={sortMode === "price" ? "active" : ""}
+              onClick={() => setSortMode("price")}
+            >
+              Cheapest
+            </button>
 
-          <button
-            className={sortMode === "distance" ? "active" : ""}
-            onClick={() => setSortMode("distance")}
-          >
-            Nearest
-          </button>
-        </div>
+            <button
+              className={sortMode === "distance" ? "active" : ""}
+              onClick={() => setSortMode("distance")}
+            >
+              Nearest
+            </button>
+          </div>
+        )}
 
-        {/* LOCATION ERROR */}
         {locationError && (
           <p className="location-error">{locationError}</p>
         )}
 
-        {/* SHOWTIME CARDS */}
+        {/* SHOWTIME LIST */}
         <div className="showtime-list">
           {visibleShowtimes.map((s) => (
             <div
@@ -701,8 +428,7 @@ export default function App() {
               }`}
             >
               <div className="showtime-row-top">
-                <h4 className="cinema-name">{s.cinema}</h4>
-
+                <h4 className="cinema-name">{s.cinemaName}</h4>
                 {userLocation &&
                   s.distanceMiles != null &&
                   isFinite(s.distanceMiles) && (
@@ -718,15 +444,13 @@ export default function App() {
                 </span>
                 <span className="showtime-time">{s.time}</span>
                 <span className="showtime-price">{s.price}</span>
-
-                {cheapest !== null &&
-                  s.priceValue === cheapest && (
-                    <span className="cheapest-badge">Cheapest</span>
-                  )}
+                {cheapest !== null && s.priceValue === cheapest && (
+                  <span className="cheapest-badge">Cheapest</span>
+                )}
               </div>
 
               <a
-                href={s.bookingUrl || "#"}
+                href={s.bookingUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="book-btn"
@@ -736,22 +460,49 @@ export default function App() {
             </div>
           ))}
 
-          {selectedFilmKey && visibleShowtimes.length === 0 && (
+          {selectedFilm && visibleShowtimes.length === 0 && (
             <p className="no-results">
-              No showtimes found near you in this date range for this
-              film.
+              No showtimes found near you for this film.
             </p>
           )}
 
-          {!selectedFilmKey && (
+          {!selectedFilm && (
             <p className="no-results">
               Select a film above to see local showtimes.
             </p>
           )}
         </div>
+
+        {/* TRAILER MODAL */}
+        {trailerOpen && filmDetails?.trailerUrl && (
+          <div
+            className="trailer-overlay"
+            onClick={() => setTrailerOpen(false)}
+          >
+            <div
+              className="trailer-modal"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="trailer-close"
+                onClick={() => setTrailerOpen(false)}
+              >
+                ✕
+              </button>
+
+              <div className="trailer-iframe-wrapper">
+                <iframe
+                  src={filmDetails.trailerUrl}
+                  title="Trailer"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                ></iframe>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
-      {/* ⭐ AD BANNER (Sticky bottom ad) */}
       <AdBanner />
     </div>
   );

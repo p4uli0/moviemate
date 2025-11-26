@@ -1,44 +1,63 @@
 // netlify/functions/ukCinema.js
 
+const BASE = "https://uk-cinema-api.co.uk/api/v2";
+
 export async function handler() {
   const API_KEY = process.env.VITE_UK_CINEMA_API_TOKEN;
 
   if (!API_KEY) {
-    console.error("Missing VITE_UK_CINEMA_API_TOKEN");
     return {
       statusCode: 500,
       body: JSON.stringify({ error: "Missing API key" }),
     };
   }
 
-  // Grab a decent chunk of showtimes nationwide.
-  // Location filtering happens in the frontend.
-  const url = "https://uk-cinema-api.co.uk/api/v2/showtimes?items=500";
-
-  console.log("Calling UK Cinema API:", url);
+  const headers = {
+    Accept: "application/json",
+    Authorization: `Bearer ${API_KEY}`,
+  };
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${API_KEY}`,
-      },
-    });
+    // Fetch all data in parallel
+    const [showRes, filmRes, cinemaRes] = await Promise.all([
+      fetch(`${BASE}/showtimes?items=500`, { headers }),
+      fetch(`${BASE}/films?items=500`, { headers }),
+      fetch(`${BASE}/cinemas?items=500`, { headers }),
+    ]);
 
-    const text = await response.text();
-    console.log("Upstream status:", response.status);
-    console.log("Sample payload:", text.slice(0, 200));
+    const [rawShowtimes, rawFilms, rawCinemas] = await Promise.all([
+      showRes.json(),
+      filmRes.json(),
+      cinemaRes.json(),
+    ]);
 
-    if (!response.ok) {
+    const showArr = Array.isArray(rawShowtimes)
+      ? rawShowtimes
+      : rawShowtimes.data || [];
+
+    const filmArr = Array.isArray(rawFilms)
+      ? rawFilms
+      : rawFilms.data || [];
+
+    const cinemaArr = Array.isArray(rawCinemas)
+      ? rawCinemas
+      : rawCinemas.data || [];
+
+    // Build lookup maps
+    const filmMap = Object.fromEntries(filmArr.map(f => [f.id, f]));
+    const cinemaMap = Object.fromEntries(cinemaArr.map(c => [c.id, c]));
+
+    // Join the data
+    const enriched = showArr.map(st => {
+      const film = filmMap[st.film_id] || null;
+      const cinema = cinemaMap[st.cinema_id] || null;
+
       return {
-        statusCode: response.status,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-        body: text,
+        ...st,
+        film,
+        cinema,
       };
-    }
+    });
 
     return {
       statusCode: 200,
@@ -46,16 +65,12 @@ export async function handler() {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*",
       },
-      body: text,
+      body: JSON.stringify(enriched),
     };
   } catch (err) {
-    console.error("Netlify ukCinema function error:", err);
+    console.error("Netlify ukCinema join error:", err);
     return {
       statusCode: 500,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
       body: JSON.stringify({ error: err.message }),
     };
   }
