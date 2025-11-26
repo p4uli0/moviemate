@@ -9,6 +9,40 @@ const CHAIN_LABELS = {
   showcase_cinemas_uk: "Showcase Cinemas",
 };
 
+// Generic helper: find first string field whose key matches any pattern
+function findStringField(obj, patterns) {
+  if (!obj || typeof obj !== "object") return null;
+  const keys = Object.keys(obj);
+  for (const key of keys) {
+    const val = obj[key];
+    if (typeof val !== "string") continue;
+    if (!patterns || patterns.length === 0) return val;
+    for (const p of patterns) {
+      if (p.test(key)) {
+        return val;
+      }
+    }
+  }
+  return null;
+}
+
+// Generic helper: find first numeric field
+function findNumberField(obj, patterns) {
+  if (!obj || typeof obj !== "object") return null;
+  const keys = Object.keys(obj);
+  for (const key of keys) {
+    const val = obj[key];
+    if (typeof val !== "number") continue;
+    if (!patterns || patterns.length === 0) return val;
+    for (const p of patterns) {
+      if (p.test(key)) {
+        return val;
+      }
+    }
+  }
+  return null;
+}
+
 export async function getShowtimesFromApi() {
   // Netlify function (server-side call to UK Cinema API)
   const res = await fetch("/.netlify/functions/ukCinema");
@@ -36,71 +70,85 @@ export async function getShowtimesFromApi() {
     ? raw.data
     : [];
 
-  // 🔍 Log ONE sample raw item so we can see the real shape
-  const sampleRaw =
-    rawArray.find((x) => x && Object.keys(x).length > 0) || null;
-
-  if (sampleRaw) {
-    console.log(
-      "UKC SAMPLE RAW ITEM:",
-      JSON.stringify(sampleRaw, null, 2)
-    );
-  } else {
-    console.log("UKC SAMPLE RAW ITEM: <none>");
-  }
+  console.log("UK Cinema: received rows:", rawArray.length);
 
   const normalised = rawArray.map((item, index) => {
     const show = item.showtime || item;
 
-    // -------- FILM --------
-    const filmRaw =
-      item.film ??
-      show.film ??
-      show.film_title ??
-      show.filmTitle ??
-      show.title ??
-      null;
-
-    let filmTitle;
+    // -------- FILM (use heuristics) --------
+    let filmTitle = null;
     let filmId = null;
     let tmdbId = null;
 
-    if (filmRaw && typeof filmRaw === "object") {
-      filmTitle =
-        filmRaw.title ||
-        filmRaw.original_title ||
-        filmRaw.name ||
-        show.film_title ||
-        show.filmName ||
-        show.title ||
-        "Unknown film";
+    // If there's a nested film object, inspect it
+    const filmObj =
+      (item.film && typeof item.film === "object" && item.film) ||
+      (show.film && typeof show.film === "object" && show.film) ||
+      null;
 
-      filmId = filmRaw.id ?? show.film_id ?? null;
+    if (filmObj) {
+      filmTitle =
+        filmObj.title ||
+        filmObj.original_title ||
+        filmObj.name ||
+        findStringField(filmObj, [/title/i, /name/i, /film/i]) ||
+        null;
+
+      filmId = filmObj.id ?? null;
       tmdbId =
-        filmRaw.tmdb_id ??
-        filmRaw.tmdbId ??
+        filmObj.tmdb_id ??
+        filmObj.tmdbId ??
+        null;
+    }
+
+    // If no title yet, try string film fields on show/item
+    if (!filmTitle) {
+      const filmString =
+        (typeof show.film === "string" && show.film) ||
+        (typeof item.film === "string" && item.film) ||
+        show.film_title ||
+        show.filmTitle ||
+        show.title ||
+        item.title ||
+        null;
+
+      if (filmString) {
+        filmTitle = filmString;
+      }
+    }
+
+    // Last resort: scan show object for any reasonable string key
+    if (!filmTitle) {
+      filmTitle =
+        findStringField(show, [/film/i, /title/i, /name/i]) ||
+        findStringField(item, [/film/i, /title/i, /name/i]) ||
+        "Unknown film";
+    }
+
+    // If we still don't have IDs, try generic numeric fields
+    if (filmId == null) {
+      filmId =
+        show.film_id ??
+        findNumberField(show, [/film.*id/i]) ??
+        null;
+    }
+
+    if (tmdbId == null) {
+      tmdbId =
         show.tmdb_id ??
         show.tmdbId ??
+        findNumberField(show, [/tmdb/i]) ??
         null;
-    } else {
-      // filmRaw is string or null
-      filmTitle =
-        (typeof filmRaw === "string" && filmRaw) ||
-        show.film_title ||
-        show.filmName ||
-        show.title ||
-        "Unknown film";
-
-      filmId = show.film_id ?? null;
-      tmdbId = show.tmdb_id ?? show.tmdbId ?? null;
     }
 
     // -------- CINEMA --------
     const cinemaObj = item.cinema || show.cinema || {};
     let cinemaName =
       cinemaObj.name ||
+      findStringField(cinemaObj, [/name/i, /cinema/i, /venue/i]) ||
       show.cinema_name ||
       show.cinemaName ||
+      findStringField(show, [/cinema/i, /venue/i]) ||
       CHAIN_LABELS[show.chain] ||
       show.chain ||
       null;
@@ -137,7 +185,8 @@ export async function getShowtimesFromApi() {
       show.minPrice ??
       show.fromPrice ??
       show.priceText ??
-      show.ticketPrice;
+      show.ticketPrice ??
+      findNumberField(show, [/price/i, /cost/i, /amount/i]);
 
     let priceValue = null;
     if (typeof priceRaw === "number") {
@@ -176,14 +225,15 @@ export async function getShowtimesFromApi() {
       show.bookingUrl ||
       show.ticket_url ||
       show.ticketUrl ||
+      findStringField(show, [/book/i, /ticket/i, /url/i, /link/i]) ||
       cinemaObj.link ||
       "#";
 
-    const normalisedItem = {
+    return {
       id: show.id ?? item.id ?? index,
       film: filmTitle,
       filmId,
-      tmdbId,
+      tmdbId, // used later to decorate with TMDB
       cinema: cinemaName,
       date,
       time,
@@ -193,16 +243,6 @@ export async function getShowtimesFromApi() {
       lng: lngShow,
       bookingUrl,
     };
-
-    // 🔍 Log ONE sample normalised item too (index 0 only)
-    if (index === 0) {
-      console.log(
-        "UKC SAMPLE NORMALISED ITEM:",
-        JSON.stringify(normalisedItem, null, 2)
-      );
-    }
-
-    return normalisedItem;
   });
 
   return normalised;
