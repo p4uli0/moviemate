@@ -30,13 +30,24 @@ export async function getShowtimesFromApi() {
     throw new Error("Invalid JSON from ukCinema function");
   }
 
-  console.log("Raw UK Cinema API data:", raw);
-
   const rawArray = Array.isArray(raw)
     ? raw
     : Array.isArray(raw?.data)
     ? raw.data
     : [];
+
+  // 🔍 Log ONE sample raw item so we can see the real shape
+  const sampleRaw =
+    rawArray.find((x) => x && Object.keys(x).length > 0) || null;
+
+  if (sampleRaw) {
+    console.log(
+      "UKC SAMPLE RAW ITEM:",
+      JSON.stringify(sampleRaw, null, 2)
+    );
+  } else {
+    console.log("UKC SAMPLE RAW ITEM: <none>");
+  }
 
   const normalised = rawArray.map((item, index) => {
     const show = item.showtime || item;
@@ -138,8 +149,8 @@ export async function getShowtimesFromApi() {
       }
     }
 
-    if (priceValue == null) {
-      priceValue = 9.99; // sensible default
+    if (priceValue == null || Number.isNaN(priceValue)) {
+      priceValue = 9.99; // default
     }
 
     const price = `£${priceValue.toFixed(2)}`;
@@ -168,11 +179,11 @@ export async function getShowtimesFromApi() {
       cinemaObj.link ||
       "#";
 
-    return {
+    const normalisedItem = {
       id: show.id ?? item.id ?? index,
       film: filmTitle,
       filmId,
-      tmdbId, // used later to decorate with TMDB
+      tmdbId,
       cinema: cinemaName,
       date,
       time,
@@ -182,8 +193,17 @@ export async function getShowtimesFromApi() {
       lng: lngShow,
       bookingUrl,
     };
+
+    // 🔍 Log ONE sample normalised item too (index 0 only)
+    if (index === 0) {
+      console.log(
+        "UKC SAMPLE NORMALISED ITEM:",
+        JSON.stringify(normalisedItem, null, 2)
+      );
+    }
+
+    return normalisedItem;
   });
 
-  console.log("Normalised UK Cinema showtimes:", normalised);
   return normalised;
 }
