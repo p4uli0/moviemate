@@ -40,23 +40,54 @@ export async function getShowtimesFromApi() {
 
   const normalised = rawArray.map((item, index) => {
     const show = item.showtime || item;
-    const film = item.film || {};
-    const cinema = item.cinema || {};
 
-    // ---- Film IDs / titles ----
-    const filmId = film.id ?? show.film_id ?? null;
-    const tmdbId = film.tmdb_id ?? show.tmdb_id ?? null;
+    // -------- FILM --------
+    const filmRaw =
+      item.film ??
+      show.film ??
+      show.film_title ??
+      show.filmTitle ??
+      show.title ??
+      null;
 
-    const filmTitle =
-      film.title ||
-      film.original_title ||
-      show.film_title ||
-      show.filmName ||
-      "Unknown film";
+    let filmTitle;
+    let filmId = null;
+    let tmdbId = null;
 
-    // ---- Cinema name ----
+    if (filmRaw && typeof filmRaw === "object") {
+      filmTitle =
+        filmRaw.title ||
+        filmRaw.original_title ||
+        filmRaw.name ||
+        show.film_title ||
+        show.filmName ||
+        show.title ||
+        "Unknown film";
+
+      filmId = filmRaw.id ?? show.film_id ?? null;
+      tmdbId =
+        filmRaw.tmdb_id ??
+        filmRaw.tmdbId ??
+        show.tmdb_id ??
+        show.tmdbId ??
+        null;
+    } else {
+      // filmRaw is string or null
+      filmTitle =
+        (typeof filmRaw === "string" && filmRaw) ||
+        show.film_title ||
+        show.filmName ||
+        show.title ||
+        "Unknown film";
+
+      filmId = show.film_id ?? null;
+      tmdbId = show.tmdb_id ?? show.tmdbId ?? null;
+    }
+
+    // -------- CINEMA --------
+    const cinemaObj = item.cinema || show.cinema || {};
     let cinemaName =
-      cinema.name ||
+      cinemaObj.name ||
       show.cinema_name ||
       show.cinemaName ||
       CHAIN_LABELS[show.chain] ||
@@ -71,12 +102,16 @@ export async function getShowtimesFromApi() {
       }
     }
 
-    // ---- Date + time ----
+    // -------- DATE & TIME --------
     const rawDate =
       show.showing_at ||
       show.showingAt ||
+      show.startsAt ||
+      show.start_time ||
+      show.startTime ||
+      show.datetime ||
       show.date ||
-      show.start_time;
+      null;
 
     const dt = rawDate ? new Date(rawDate) : new Date();
     const safeDt = isNaN(dt.getTime()) ? new Date() : dt;
@@ -84,48 +119,65 @@ export async function getShowtimesFromApi() {
     const date = safeDt;
     const time = safeDt.toTimeString().slice(0, 5); // "HH:MM"
 
-    // ---- Price (placeholder for now) ----
-    const basePrice =
-      typeof show.price === "number"
-        ? show.price
-        : typeof show.priceValue === "number"
-        ? show.priceValue
-        : 9.99;
+    // -------- PRICE --------
+    const priceRaw =
+      show.price ??
+      show.min_price ??
+      show.minPrice ??
+      show.fromPrice ??
+      show.priceText ??
+      show.ticketPrice;
 
-    const priceValue = Number(basePrice.toFixed(2));
+    let priceValue = null;
+    if (typeof priceRaw === "number") {
+      priceValue = priceRaw;
+    } else if (typeof priceRaw === "string") {
+      const m = priceRaw.match(/([\d,.]+)/);
+      if (m) {
+        priceValue = parseFloat(m[1].replace(",", ""));
+      }
+    }
 
-    // ---- Location ----
+    if (priceValue == null) {
+      priceValue = 9.99; // sensible default
+    }
+
+    const price = `£${priceValue.toFixed(2)}`;
+
+    // -------- LOCATION --------
     const latShow =
       typeof show.latitude === "number"
         ? show.latitude
-        : typeof cinema.latitude === "number"
-        ? cinema.latitude
+        : typeof cinemaObj.latitude === "number"
+        ? cinemaObj.latitude
         : null;
 
     const lngShow =
       typeof show.longitude === "number"
         ? show.longitude
-        : typeof cinema.longitude === "number"
-        ? cinema.longitude
+        : typeof cinemaObj.longitude === "number"
+        ? cinemaObj.longitude
         : null;
 
-    // ---- Booking link ----
+    // -------- BOOKING URL --------
     const bookingUrl =
       show.booking_link ||
-      cinema.link ||
       show.bookingUrl ||
+      show.ticket_url ||
+      show.ticketUrl ||
+      cinemaObj.link ||
       "#";
 
     return {
       id: show.id ?? item.id ?? index,
       film: filmTitle,
       filmId,
-      tmdbId, // ✅ this is what App.jsx uses to match TMDB movie.id
+      tmdbId, // used later to decorate with TMDB
       cinema: cinemaName,
       date,
       time,
       priceValue,
-      price: `£${priceValue.toFixed(2)}`,
+      price,
       lat: latShow,
       lng: lngShow,
       bookingUrl,
