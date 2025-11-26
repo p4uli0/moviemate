@@ -1,21 +1,16 @@
 // ===============================
 // MOVIEMATE – MAIN APP
-// TMDB posters + UK Cinema showtimes
+// NEAR-ME FIRST:
+// - Use UK Cinema API showtimes as the source of truth
+// - Derive film list from local showtimes
+// - (Optionally) decorate with TMDB via tmdbId
 // ===============================
 
 import { useState, useEffect, useRef } from "react";
 import "./index.css";
-import { getNowPlayingUK, getMovieDetails } from "./api/tmdb.js";
+import { getMovieDetails } from "./api/tmdb.js";
 import AdBanner from "./components/AdBanner.jsx";
 import { getShowtimesFromApi } from "./api/ukCinema";
-
-// FALLBACK MOVIES (if TMDB fails)
-const FALLBACK_MOVIES = [
-  { id: 99901, title: "Dune: Part Two", poster_path: null, vote_average: 8.4 },
-  { id: 99902, title: "Inside Out 2", poster_path: null, vote_average: 7.9 },
-  { id: 99903, title: "Deadpool & Wolverine", poster_path: null, vote_average: 8.1 },
-  { id: 99904, title: "The Fall Guy", poster_path: null, vote_average: 7.0 },
-];
 
 // -------------------------------
 // Helper functions
@@ -113,43 +108,24 @@ function normaliseTitle(str) {
 // MAIN APP
 // -------------------------------
 export default function App() {
-  const [nowPlaying, setNowPlaying] = useState(FALLBACK_MOVIES);
-  const [showtimes, setShowtimes] = useState([]); // from ukCinema.js
+  const [allShowtimes, setAllShowtimes] = useState([]);       // from ukCinema.js
+  const [films, setFilms] = useState([]);                     // derived from showtimes
+  const [filmDetailsByTmdbId, setFilmDetailsByTmdbId] = useState({}); // TMDB details map
 
-  const [selectedFilm, setSelectedFilm] = useState(null); // full TMDB movie object
-  const [filmDetails, setFilmDetails] = useState(null);
-  const [detailCache, setDetailCache] = useState({});
-  const [trailerOpen, setTrailerOpen] = useState(false);
-
-  const [sortMode, setSortMode] = useState("price"); // "price" | "distance"
+  const [selectedFilm, setSelectedFilm] = useState(null);     // { key, title, tmdbId }
+  const [sortMode, setSortMode] = useState("price");          // "price" | "distance"
   const [dateFilter, setDateFilter] = useState("today");
 
   const [userLocation, setUserLocation] = useState(null);
   const [locationError, setLocationError] = useState("");
 
+  const [trailerOpen, setTrailerOpen] = useState(false);
+
   const showtimesRef = useRef(null);
   const moviesRef = useRef(null);
 
   // -------------------------------
-  // Load TMDB movies
-  // -------------------------------
-  useEffect(() => {
-    async function loadMovies() {
-      try {
-        const movies = await getNowPlayingUK();
-        if (!movies.length) throw new Error("empty");
-        setNowPlaying(movies);
-      } catch (err) {
-        console.error("TMDB error, using fallback movies:", err);
-        setNowPlaying(FALLBACK_MOVIES);
-      }
-    }
-
-    loadMovies();
-  }, []);
-
-  // -------------------------------
-  // Load UK Cinema showtimes (already normalised in ukCinema.js)
+  // Load UK Cinema showtimes
   // -------------------------------
   useEffect(() => {
     async function loadShowtimesFromApi() {
@@ -158,13 +134,13 @@ export default function App() {
         console.log("Showtimes from API (normalised):", apiShowtimes);
 
         if (Array.isArray(apiShowtimes)) {
-          setShowtimes(apiShowtimes);
+          setAllShowtimes(apiShowtimes);
         } else {
-          setShowtimes([]);
+          setAllShowtimes([]);
         }
       } catch (err) {
         console.error("UK Cinema API error:", err);
-        setShowtimes([]);
+        setAllShowtimes([]);
       }
     }
 
@@ -196,74 +172,15 @@ export default function App() {
   }, []);
 
   // -------------------------------
-  // Movie click → details + scroll
+  // Derive "near me in date range" showtimes
   // -------------------------------
-  async function handleMovieClick(m) {
-    setSelectedFilm(m);
+  const filteredShowtimes = (() => {
+    console.log("DEBUG total showtimes:", allShowtimes.length);
+    if (!allShowtimes.length) return [];
 
-    if (detailCache[m.id]) {
-      setFilmDetails(detailCache[m.id]);
-    } else {
-      try {
-        const details = await getMovieDetails(m.id);
-        setDetailCache((p) => ({ ...p, [m.id]: details }));
-        setFilmDetails(details);
-      } catch (err) {
-        console.error("Error loading film details:", err);
-        setFilmDetails(null);
-      }
-    }
+    let list = allShowtimes.slice();
 
-    setTrailerOpen(false);
-
-    setTimeout(() => {
-      showtimesRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 120);
-  }
-
-  function clearFilm() {
-    setSelectedFilm(null);
-    setFilmDetails(null);
-    setTrailerOpen(false);
-
-    setTimeout(() => {
-      moviesRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 80);
-  }
-
-  // -------------------------------
-  // FILTER + SORT SHOWTIMES
-  // -------------------------------
-  const visibleShowtimes = (() => {
-    console.log("DEBUG total showtimes:", showtimes.length);
-
-    if (!selectedFilm) {
-      return [];
-    }
-
-    let list = showtimes.slice();
-
-    // --- 1) Filter by film title (fuzzy) ---
-    const key = normaliseTitle(selectedFilm.title);
-    console.log("Selected film:", selectedFilm.title, "→ key:", key);
-
-    const titleMatched = list.filter((s) => {
-      const t = normaliseTitle(s.film);
-      return t && (t === key || t.includes(key) || key.includes(t));
-    });
-
-    console.log("Title-matched showtimes:", titleMatched.length);
-
-    if (titleMatched.length === 0) {
-      console.warn(
-        "⚠ No showtimes matched by title for this film. Showing none."
-      );
-      return [];
-    }
-
-    list = titleMatched;
-
-    // --- 2) Filter by date range ---
+    // 1) Filter by date range
     const { start, end } = getDateRange(dateFilter);
     const sKey = normaliseDate(start);
     const eKey = normaliseDate(end);
@@ -274,9 +191,9 @@ export default function App() {
     });
     console.log("After date filter:", list.length);
 
-    if (list.length === 0) return [];
+    if (!list.length) return [];
 
-    // --- 3) Add distances + filter by radius (50 miles) if we have location ---
+    // 2) Add distances & filter by radius if we have location
     if (userLocation) {
       list = list.map((s) => ({
         ...s,
@@ -295,36 +212,187 @@ export default function App() {
       );
 
       console.log(
-        "With valid distance:",
+        "With coords:",
         withCoords.length,
         "out of",
         list.length
       );
 
-      // hard radius of 50 miles to avoid random London stuff
+      // Hard 50-mile radius for "near me"
       const withinRadius = withCoords.filter(
         (s) => s.distanceMiles <= 50
       );
 
       if (withinRadius.length > 0) {
+        console.log("Within 50 miles:", withinRadius.length);
         list = withinRadius;
-        console.log("After 50-mile radius:", list.length);
       } else {
-        // if nothing local but there WERE matches, fall back to all title matches
         console.log(
-          "No matches within 50 miles, falling back to all title matches."
+          "No showtimes within 50 miles; falling back to all (date-only filtered) showtimes."
         );
       }
     }
 
-    if (list.length === 0) return [];
+    return list;
+  })();
 
-    // --- 4) Sort list ---
-    list = list.sort((a, b) => {
-      if (sortMode === "price") {
-        return a.priceValue - b.priceValue;
+  // -------------------------------
+  // Derive unique films from filtered showtimes
+  // -------------------------------
+  useEffect(() => {
+    const map = new Map();
+
+    for (const s of filteredShowtimes) {
+      const normTitle = normaliseTitle(s.film);
+      const key =
+        s.tmdbId != null
+          ? `tmdb-${String(s.tmdbId)}`
+          : `title-${normTitle || s.film}`;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          title: s.film,
+          tmdbId: s.tmdbId ?? null,
+        });
       }
+    }
 
+    const filmArray = Array.from(map.values());
+    console.log("Derived films from showtimes:", filmArray);
+    setFilms(filmArray);
+
+    // If the currently selected film disappears from the local list (e.g. date changed),
+    // clear the selection.
+    if (
+      selectedFilm &&
+      !filmArray.some((f) => f.key === selectedFilm.key)
+    ) {
+      setSelectedFilm(null);
+      setTrailerOpen(false);
+    }
+  }, [filteredShowtimes]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // -------------------------------
+  // Fetch TMDB details for any films with tmdbId
+  // -------------------------------
+  useEffect(() => {
+    async function fetchDetails() {
+      const toFetch = films.filter(
+        (f) =>
+          f.tmdbId &&
+          !filmDetailsByTmdbId[String(f.tmdbId)]
+      );
+
+      if (!toFetch.length) return;
+
+      for (const f of toFetch) {
+        try {
+          const details = await getMovieDetails(f.tmdbId);
+          setFilmDetailsByTmdbId((prev) => ({
+            ...prev,
+            [String(f.tmdbId)]: details,
+          }));
+        } catch (err) {
+          console.error(
+            "Failed to fetch TMDB details for",
+            f.title,
+            "tmdbId:",
+            f.tmdbId,
+            err
+          );
+        }
+      }
+    }
+
+    fetchDetails();
+  }, [films, filmDetailsByTmdbId]);
+
+  // -------------------------------
+  // Movie click → select film + scroll
+  // -------------------------------
+  function handleFilmClick(film) {
+    setSelectedFilm(film);
+    setTrailerOpen(false);
+
+    setTimeout(() => {
+      showtimesRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 120);
+  }
+
+  function clearFilm() {
+    setSelectedFilm(null);
+    setTrailerOpen(false);
+
+    setTimeout(() => {
+      moviesRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 80);
+  }
+
+  // -------------------------------
+  // FILTER + SORT SHOWTIMES FOR SELECTED FILM
+  // -------------------------------
+  const visibleShowtimes = (() => {
+    if (!selectedFilm) return [];
+
+    let list = filteredShowtimes.slice();
+
+    const selectedNormTitle = normaliseTitle(selectedFilm.title);
+    const selectedTmdbId = selectedFilm.tmdbId || null;
+
+    console.log(
+      "Selected film:",
+      selectedFilm.title,
+      "| tmdbId:",
+      selectedTmdbId,
+      "| normTitle:",
+      selectedNormTitle
+    );
+
+    // 1) Prefer tmdbId match if available
+    let matched = [];
+    if (selectedTmdbId != null) {
+      matched = list.filter(
+        (s) =>
+          s.tmdbId != null &&
+          String(s.tmdbId) === String(selectedTmdbId)
+      );
+      console.log("Matched by tmdbId:", matched.length);
+    }
+
+    // 2) Fallback: fuzzy title match
+    if (!matched.length) {
+      matched = list.filter((s) => {
+        const t = normaliseTitle(s.film);
+        return (
+          t &&
+          (t === selectedNormTitle ||
+            t.includes(selectedNormTitle) ||
+            selectedNormTitle.includes(t))
+        );
+      });
+      console.log("Matched by title:", matched.length);
+    }
+
+    if (!matched.length) {
+      console.warn(
+        "⚠ No showtimes matched by tmdbId or title for this film."
+      );
+      return [];
+    }
+
+    list = matched;
+
+    // 3) Sort list
+    list = list.map((s) => {
+      // distanceMiles is already on filteredShowtimes when userLocation is set
+      if (!userLocation && s.distanceMiles == null) {
+        return { ...s, distanceMiles: Infinity };
+      }
+      return s;
+    });
+
+    list = list.sort((a, b) => {
       if (sortMode === "distance" && userLocation) {
         const da =
           typeof a.distanceMiles === "number"
@@ -337,6 +405,7 @@ export default function App() {
         return da - db;
       }
 
+      // default / price
       return a.priceValue - b.priceValue;
     });
 
@@ -348,6 +417,11 @@ export default function App() {
       ? Math.min(...visibleShowtimes.map((x) => x.priceValue))
       : null;
 
+  const selectedFilmDetails =
+    selectedFilm?.tmdbId != null
+      ? filmDetailsByTmdbId[String(selectedFilm.tmdbId)]
+      : null;
+
   // ===============================
   // RENDER
   // ===============================
@@ -356,43 +430,66 @@ export default function App() {
       {/* HEADER */}
       <header className="header">
         <div className="logo">🎬 MovieMate</div>
-        <p className="tagline">Find. Compare. Watch</p>
+        <p className="tagline">Showtimes near you</p>
       </header>
 
-      {/* MOVIES GRID */}
+      {/* MOVIES GRID – derived from showtimes */}
       <section className="now-playing-section" ref={moviesRef}>
-        <h2 className="section-title">Now in UK Cinemas</h2>
+        <h2 className="section-title">
+          Now in cinemas near you
+        </h2>
 
         <div className="movies-grid">
-          {nowPlaying.map((m) => (
-            <button
-              key={m.id}
-              className="movie-card"
-              onClick={() => handleMovieClick(m)}
-            >
-              <div className="movie-poster-wrapper">
-                <img
-                  className="movie-poster"
-                  src={
-                    m.poster_path
-                      ? `https://image.tmdb.org/t/p/w500${m.poster_path}`
-                      : "https://via.placeholder.com/500x750?text=No+Image"
-                  }
-                  alt={m.title}
-                />
-                <div className="movie-rating-pill">
-                  ★ {m.vote_average?.toFixed(1)}
+          {films.map((film) => {
+            const details =
+              film.tmdbId != null
+                ? filmDetailsByTmdbId[String(film.tmdbId)]
+                : null;
+
+            const posterPath = details?.poster_path || null;
+            const rating =
+              details?.vote_average != null
+                ? details.vote_average
+                : null;
+
+            return (
+              <button
+                key={film.key}
+                className="movie-card"
+                onClick={() => handleFilmClick(film)}
+              >
+                <div className="movie-poster-wrapper">
+                  <img
+                    className="movie-poster"
+                    src={
+                      posterPath
+                        ? `https://image.tmdb.org/t/p/w500${posterPath}`
+                        : "https://via.placeholder.com/500x750?text=No+Image"
+                    }
+                    alt={film.title}
+                  />
+                  {rating != null && (
+                    <div className="movie-rating-pill">
+                      ★ {rating.toFixed(1)}
+                    </div>
+                  )}
                 </div>
-              </div>
-              <p className="movie-name">{m.title}</p>
-            </button>
-          ))}
+                <p className="movie-name">{film.title}</p>
+              </button>
+            );
+          })}
         </div>
+
+        {!films.length && (
+          <p className="no-results">
+            No films found near you in this date range.
+          </p>
+        )}
       </section>
 
       {/* SHOWTIMES */}
       <section className="showtimes-section" ref={showtimesRef}>
-        <h2 className="section-title-small">Showtimes near you</h2>
+        <h2 className="section-title-small">Showtimes</h2>
 
         {/* DATE FILTERS */}
         <div className="date-filter-bar">
@@ -417,37 +514,53 @@ export default function App() {
         </div>
 
         {/* FILM DETAILS HEADER */}
-        {selectedFilm && filmDetails && (
+        {selectedFilm && (
           <div className="film-detail-header">
             <div className="film-detail-text">
-              <h3 className="film-detail-title">{filmDetails.title}</h3>
+              <h3 className="film-detail-title">
+                {selectedFilm.title}
+              </h3>
 
-              <div className="film-detail-meta">
-                {filmDetails.cert && (
-                  <span className="film-cert">{filmDetails.cert}</span>
-                )}
-                <span className="film-rating">
-                  ★ {filmDetails.vote_average?.toFixed(1)}
-                </span>
-              </div>
+              {selectedFilmDetails && (
+                <>
+                  <div className="film-detail-meta">
+                    {selectedFilmDetails.cert && (
+                      <span className="film-cert">
+                        {selectedFilmDetails.cert}
+                      </span>
+                    )}
+                    {selectedFilmDetails.vote_average && (
+                      <span className="film-rating">
+                        ★{" "}
+                        {selectedFilmDetails.vote_average.toFixed(
+                          1
+                        )}
+                      </span>
+                    )}
+                  </div>
 
-              {filmDetails.overview && (
-                <p className="film-overview">{filmDetails.overview}</p>
-              )}
+                  {selectedFilmDetails.overview && (
+                    <p className="film-overview">
+                      {selectedFilmDetails.overview}
+                    </p>
+                  )}
 
-              {filmDetails.cast && (
-                <p className="film-cast">
-                  <strong>Cast:</strong> {filmDetails.cast.join(", ")}
-                </p>
-              )}
+                  {selectedFilmDetails.cast && (
+                    <p className="film-cast">
+                      <strong>Cast:</strong>{" "}
+                      {selectedFilmDetails.cast.join(", ")}
+                    </p>
+                  )}
 
-              {filmDetails.trailerUrl && (
-                <button
-                  className="trailer-btn"
-                  onClick={() => setTrailerOpen(true)}
-                >
-                  ▶ View trailer
-                </button>
+                  {selectedFilmDetails.trailerUrl && (
+                    <button
+                      className="trailer-btn"
+                      onClick={() => setTrailerOpen(true)}
+                    >
+                      ▶ View trailer
+                    </button>
+                  )}
+                </>
               )}
 
               <button className="back-btn" onClick={clearFilm}>
@@ -455,15 +568,13 @@ export default function App() {
               </button>
             </div>
 
-            <img
-              className="film-detail-poster"
-              src={
-                filmDetails.poster_path
-                  ? `https://image.tmdb.org/t/p/w500${filmDetails.poster_path}`
-                  : "https://via.placeholder.com/300x450?text=No+Image"
-              }
-              alt={filmDetails.title}
-            />
+            {selectedFilmDetails?.poster_path && (
+              <img
+                className="film-detail-poster"
+                src={`https://image.tmdb.org/t/p/w500${selectedFilmDetails.poster_path}`}
+                alt={selectedFilm.title}
+              />
+            )}
           </div>
         )}
 
@@ -537,7 +648,8 @@ export default function App() {
 
           {selectedFilm && visibleShowtimes.length === 0 && (
             <p className="no-results">
-              No showtimes found near you in this date range for this film.
+              No showtimes found near you in this date range for this
+              film.
             </p>
           )}
 
@@ -549,33 +661,34 @@ export default function App() {
         </div>
 
         {/* TRAILER MODAL */}
-        {trailerOpen && filmDetails?.trailerUrl && (
-          <div
-            className="trailer-overlay"
-            onClick={() => setTrailerOpen(false)}
-          >
+        {trailerOpen &&
+          selectedFilmDetails?.trailerUrl && (
             <div
-              className="trailer-modal"
-              onClick={(e) => e.stopPropagation()}
+              className="trailer-overlay"
+              onClick={() => setTrailerOpen(false)}
             >
-              <button
-                className="trailer-close"
-                onClick={() => setTrailerOpen(false)}
+              <div
+                className="trailer-modal"
+                onClick={(e) => e.stopPropagation()}
               >
-                ✕
-              </button>
+                <button
+                  className="trailer-close"
+                  onClick={() => setTrailerOpen(false)}
+                >
+                  ✕
+                </button>
 
-              <div className="trailer-iframe-wrapper">
-                <iframe
-                  src={filmDetails.trailerUrl}
-                  title="Trailer"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                ></iframe>
+                <div className="trailer-iframe-wrapper">
+                  <iframe
+                    src={selectedFilmDetails.trailerUrl}
+                    title="Trailer"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  ></iframe>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
       </section>
 
       {/* ⭐ AD BANNER (Sticky bottom ad) */}
