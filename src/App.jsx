@@ -1,9 +1,6 @@
 // ===============================
 // MOVIEMATE – MAIN APP
 // TMDB posters + UK Cinema showtimes
-// - Shows ALL now-playing posters
-// - When a film is selected, we show ALL local showtimes
-//   for the chosen date range (not filtered by title – YET)
 // ===============================
 
 import { useState, useEffect, useRef } from "react";
@@ -93,12 +90,31 @@ function getDateRange(mode) {
   return { start: today, end: today };
 }
 
-// ===============================
+// Normalise film titles for fuzzy matching
+function normaliseTitle(str) {
+  if (!str) return "";
+
+  return str
+    .toLowerCase()
+    // remove anything in brackets e.g. (12A), (U), (Subtitled)
+    .replace(/\([^)]*\)/g, " ")
+    // treat dashes/colons as word boundaries
+    .replace(/[-:–—]/g, " ")
+    // remove common junk words and rating codes
+    .replace(/\b(3d|2d|imax|the movie|movie|film|u|pg|12a|12|15|18)\b/g, "")
+    // strip anything that's not alphanumeric
+    .replace(/[^a-z0-9]+/g, " ")
+    // collapse spaces
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// -------------------------------
 // MAIN APP
-// ===============================
+// -------------------------------
 export default function App() {
   const [nowPlaying, setNowPlaying] = useState(FALLBACK_MOVIES);
-  const [showtimes, setShowtimes] = useState([]); // normalised showtimes from ukCinema.js
+  const [showtimes, setShowtimes] = useState([]); // from ukCinema.js
 
   const [selectedFilm, setSelectedFilm] = useState(null); // full TMDB movie object
   const [filmDetails, setFilmDetails] = useState(null);
@@ -134,7 +150,7 @@ export default function App() {
 
   // -------------------------------
   // Load UK Cinema showtimes (already normalised in ukCinema.js)
-// -------------------------------
+  // -------------------------------
   useEffect(() => {
     async function loadShowtimesFromApi() {
       try {
@@ -156,7 +172,7 @@ export default function App() {
   }, []);
 
   // -------------------------------
-  // Geolocation (for distance only)
+  // Geolocation (for distance)
 // -------------------------------
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -217,20 +233,37 @@ export default function App() {
 
   // -------------------------------
   // FILTER + SORT SHOWTIMES
-  // NOTE: for now we are NOT filtering by film title/id.
-  // Any selected film just "unlocks" the list.
-// -------------------------------
+  // -------------------------------
   const visibleShowtimes = (() => {
     console.log("DEBUG total showtimes:", showtimes.length);
 
-    // No film selected → keep UX same as before (show message)
     if (!selectedFilm) {
       return [];
     }
 
     let list = showtimes.slice();
 
-    // 1) Filter by date range
+    // --- 1) Filter by film title (fuzzy) ---
+    const key = normaliseTitle(selectedFilm.title);
+    console.log("Selected film:", selectedFilm.title, "→ key:", key);
+
+    const titleMatched = list.filter((s) => {
+      const t = normaliseTitle(s.film);
+      return t && (t === key || t.includes(key) || key.includes(t));
+    });
+
+    console.log("Title-matched showtimes:", titleMatched.length);
+
+    if (titleMatched.length === 0) {
+      console.warn(
+        "⚠ No showtimes matched by title for this film. Showing none."
+      );
+      return [];
+    }
+
+    list = titleMatched;
+
+    // --- 2) Filter by date range ---
     const { start, end } = getDateRange(dateFilter);
     const sKey = normaliseDate(start);
     const eKey = normaliseDate(end);
@@ -243,7 +276,7 @@ export default function App() {
 
     if (list.length === 0) return [];
 
-    // 2) Add distances if we have location (for sorting only)
+    // --- 3) Add distances + filter by radius (50 miles) if we have location ---
     if (userLocation) {
       list = list.map((s) => ({
         ...s,
@@ -254,10 +287,39 @@ export default function App() {
           s.lng
         ),
       }));
-      console.log("After distance mapping, showtimes:", list.length);
+
+      const withCoords = list.filter(
+        (s) =>
+          typeof s.distanceMiles === "number" &&
+          isFinite(s.distanceMiles)
+      );
+
+      console.log(
+        "With valid distance:",
+        withCoords.length,
+        "out of",
+        list.length
+      );
+
+      // hard radius of 50 miles to avoid random London stuff
+      const withinRadius = withCoords.filter(
+        (s) => s.distanceMiles <= 50
+      );
+
+      if (withinRadius.length > 0) {
+        list = withinRadius;
+        console.log("After 50-mile radius:", list.length);
+      } else {
+        // if nothing local but there WERE matches, fall back to all title matches
+        console.log(
+          "No matches within 50 miles, falling back to all title matches."
+        );
+      }
     }
 
-    // 3) Sort list
+    if (list.length === 0) return [];
+
+    // --- 4) Sort list ---
     list = list.sort((a, b) => {
       if (sortMode === "price") {
         return a.priceValue - b.priceValue;
@@ -475,7 +537,7 @@ export default function App() {
 
           {selectedFilm && visibleShowtimes.length === 0 && (
             <p className="no-results">
-              No showtimes found near you in this date range.
+              No showtimes found near you in this date range for this film.
             </p>
           )}
 
